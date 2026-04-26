@@ -9,6 +9,21 @@ require('dotenv').config();
 const connectDB = require('./config/db');
 const setupSocket = require('./socket/socketHandler');
 
+// DIRECT AI TEST ROUTE (for troubleshooting)
+app.get('/api/test-ai', async (req, res) => {
+  try {
+    const { askAITutor } = require('./services/geminiService');
+    console.log('Testing AI with key:', process.env.GEMINI_API_KEY ? 'Present' : 'MISSING');
+    const response = await askAITutor({
+      topicName: 'System Test',
+      question: 'Respond with "AI_WORKING"'
+    });
+    res.json({ success: true, response });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message, key: process.env.GEMINI_API_KEY ? 'Present' : 'MISSING' });
+  }
+});
+
 // Import routes
 const authRoutes = require('./routes/auth');
 const courseRoutes = require('./routes/courses');

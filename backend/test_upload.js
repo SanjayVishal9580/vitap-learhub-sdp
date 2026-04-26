@@ -1,0 +1,1 @@
+const cloudinary = require('./config/cloudinary'); cloudinary.uploader.upload('package.json', { folder: 'vitap-learnhub/documents', resource_type: 'image', format: 'pdf' }, (err, result) => { if (err) console.error(err); else console.log(result.url); });

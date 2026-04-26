@@ -1,0 +1,53 @@
+.authPage {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+}
+
+.bgOrbs { position: fixed; inset: 0; pointer-events: none; }
+.orb1 { position: absolute; width: 350px; height: 350px; background: #6366f1; border-radius: 50%; filter: blur(80px); opacity: 0.25; top: -80px; right: -80px; animation: orbFloat 8s ease-in-out infinite; }
+.orb2 { position: absolute; width: 250px; height: 250px; background: #a855f7; border-radius: 50%; filter: blur(80px); opacity: 0.2; bottom: -60px; left: -60px; animation: orbFloat 10s ease-in-out infinite reverse; }
+
+@keyframes orbFloat { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-20px,20px); } }
+
+.authContainer { position: relative; z-index: 10; width: 100%; max-width: 440px; padding: 20px; }
+
+.authCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  padding: 40px;
+  box-shadow: var(--shadow-lg);
+  animation: slideUp 0.4s ease;
+}
+
+@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+.authHeader { text-align: center; margin-bottom: 32px; }
+.authLogo { font-size: 2.5rem; cursor: pointer; display: block; margin-bottom: 12px; }
+.authTitle { font-size: 1.6rem; font-weight: 800; }
+.authSubtitle { font-size: 0.9rem; color: var(--text-muted); margin-top: 4px; }
+
+.passwordWrap { position: relative; }
+.eyeBtn {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; font-size: 1.1rem;
+}
+
+.roleSelect { display: flex; gap: 12px; }
+.roleBtn {
+  flex: 1; padding: 12px; border: 2px solid var(--border-color); border-radius: 12px;
+  background: var(--bg-tertiary); color: var(--text-primary); font-family: var(--font-main);
+  font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: all 0.2s;
+}
+.roleBtnActive { border-color: var(--accent); background: var(--accent-light); color: var(--accent); }
+
+.authBtn { width: 100%; justify-content: center; padding: 14px; font-size: 1rem; margin-top: 8px; }
+
+.authFooter { text-align: center; margin-top: 24px; font-size: 0.9rem; color: var(--text-muted); }
+.authLink { color: var(--accent); font-weight: 600; cursor: pointer; }
+.authLink:hover { text-decoration: underline; }
+
+@media (max-width: 480px) {
+  .authCard { padding: 28px; border-radius: 20px; }
+  .authTitle { font-size: 1.4rem; }
+}

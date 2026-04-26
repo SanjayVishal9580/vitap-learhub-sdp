@@ -4,25 +4,27 @@ let genAIInstance = null;
 
 const getGenAI = () => {
   if (!genAIInstance) {
-    if (!process.env.GEMINI_API_KEY) {
-      // Try to load dotenv just in case
+    const key = (process.env.GEMINI_API_KEY || '').trim();
+    if (!key) {
       require('dotenv').config();
     }
-    if (!process.env.GEMINI_API_KEY) {
+    const finalKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!finalKey) {
       console.error('CRITICAL: GEMINI_API_KEY is missing from environment variables!');
     }
-    genAIInstance = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    console.log('Gemini SDK Initialized with key:', process.env.GEMINI_API_KEY ? `${process.env.GEMINI_API_KEY.substring(0, 5)}...` : 'MISSING');
+    genAIInstance = new GoogleGenerativeAI(finalKey);
+    console.log('Gemini SDK Initialized with key:', finalKey ? `${finalKey.substring(0, 5)}...` : 'MISSING');
   }
   return genAIInstance;
 };
 
 // Models to try in order of preference
 const MODEL_FALLBACKS = [
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-pro',
   'gemini-3.1-flash-lite-preview',
   'gemini-2.0-flash',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-flash',
   'gemini-flash-latest',
   'gemini-pro-latest',
 ];

@@ -10,6 +10,30 @@ const Topic = require('../models/Topic');
 // Helper to check if a string is a valid MongoDB ObjectId
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === id;
 
+// @route   GET /api/ai/test-connection
+// @desc    Test if Gemini AI is working and the API key is valid
+router.get('/test-connection', async (req, res) => {
+  try {
+    const { askAITutor } = require('../services/geminiService');
+    const response = await askAITutor({
+      topicName: 'Testing',
+      question: 'Respond with the word "OK" if you can hear me.'
+    });
+    res.json({ 
+      success: true, 
+      message: 'Gemini AI is connected!', 
+      response,
+      keyPreview: process.env.GEMINI_API_KEY ? `${process.env.GEMINI_API_KEY.substring(0, 8)}...` : 'MISSING'
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      keyPreview: process.env.GEMINI_API_KEY ? `${process.env.GEMINI_API_KEY.substring(0, 8)}...` : 'MISSING'
+    });
+  }
+});
+
 // @route   GET /api/ai/tutor/history/:topicId
 router.get('/tutor/history/:topicId', protect, async (req, res) => {
   try {

@@ -25,17 +25,38 @@ const messageRoutes = require('./routes/messages');
 const app = express();
 const server = http.createServer(app);
 
+// Request Logger
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${req.headers.origin}`);
+  next();
+});
+
 // Socket.io setup
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+console.log('Configured FRONTEND_URL:', frontendUrl);
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: [frontendUrl, frontendUrl.replace(/\/$/, '')],
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 });
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [frontendUrl, frontendUrl.replace(/\/$/, ''), 'http://localhost:3000'];
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      console.warn(`Blocked by CORS: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 app.use(helmet({ crossOriginResourcePolicy: false }));

@@ -31,7 +31,16 @@
 
 ---
 
-## 👤 New Feature: Profile Management
+## 🚀 Deployment Configured
+**Platforms:** Vercel (Frontend), Render (Backend)
+**Status:** Ready for Go-Live
+
+**Key Configurations Added:**
+- Environment variable support for `FRONTEND_URL`, `NEXT_PUBLIC_API_URL`, and `NEXT_PUBLIC_SOCKET_URL`.
+- Procfile/Start scripts ready for production.
+- CORS dynamically handles production URLs via environment variables.
+
+See [DEPLOYMENT_GUIDE.md](file:///C:/Users/sanja/.gemini/antigravity/brain/7f76d412-96d8-428d-a093-e454596e72ba/deployment_guide.md) for full instructions.
 
 ### Features Added:
 1. **View Profile** - Users can see their information, stats, and achievements

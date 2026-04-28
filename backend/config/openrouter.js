@@ -133,6 +133,14 @@ const generateWithOpenRouter = async (prompt, contentType = 'text') => {
           (status ? ` [Status: ${status}]` : '')
         );
         
+        // 401 Unauthorized - invalid API key
+        if (status === 401) {
+          console.error('[OPENROUTER] Invalid API key - check OPENROUTER_API_KEY in .env');
+          console.error(`[OPENROUTER] Key starts with: ${apiKey.substring(0, 10)}...`);
+          // Don't retry, throw immediately
+          throw error;
+        }
+        
         // Rate limited - wait and retry
         if (status === 429) {
           if (retryAttempt < RETRY_DELAYS.length - 1) {

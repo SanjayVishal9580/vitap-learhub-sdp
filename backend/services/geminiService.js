@@ -1,69 +1,133 @@
-const { generateWithFallback } = require('../config/gemini');
+const { generateWithOpenRouter, extractJSON } = require('../config/openrouter');
+
+// ============================================================================
+// OPENROUTER AI SERVICE - QUIZ & AI TUTOR
+// Production-ready implementations with comprehensive error handling
+// ============================================================================
 
 /**
- * Generate a quiz using Gemini AI based on teacher-defined context
+ * Generate a quiz using Gemini AI
+ * Returns properly validated quiz questions
  */
-const generateQuiz = async ({ topicName, quizContext, difficulty = 'MEDIUM', questionCount = 10, previousScores = [] }) => {
+const generateQuiz = async ({
+  topicName = 'General',
+  quizContext = '',
+  difficulty = 'MEDIUM',
+  questionCount = 10,
+  previousScores = [],
+}) => {
   try {
+    if (!topicName || topicName.trim().length === 0) {
+      throw new Error('Topic name is required');
+    }
+    
+    if (![5, 10, 15, 20].includes(questionCount)) {
+      questionCount = 10; // Default to 10
+    }
+    
+    const validDifficulties = ['EASY', 'MEDIUM', 'HARD'];
+    if (!validDifficulties.includes(difficulty)) {
+      difficulty = 'MEDIUM';
+    }
+
     const difficultyGuide = {
-      EASY: 'basic recall and simple understanding questions',
-      MEDIUM: 'application-based and analytical questions',
-      HARD: 'complex problem-solving, edge cases, and advanced concept questions',
+      EASY: 'basic recall, definitions, and simple understanding questions. Questions should be straightforward and test fundamental concepts.',
+      MEDIUM: 'application-based and analytical questions. Students should apply their knowledge to solve problems.',
+      HARD: 'complex problem-solving, edge cases, critical thinking, and advanced concept integration questions.',
     };
 
-    const prompt = `You are a quiz generator for a university-level computer science course.
+    const scoreContext = previousScores.length > 0
+      ? `Recent attempts: ${previousScores.join(', ')}. Adjust difficulty based on student performance.`
+      : '';
+
+    const prompt = `You are an expert educational quiz generator for computer science courses.
+
+TOPIC: ${topicName}
+CONTEXT: ${quizContext || 'General computer science knowledge'}
+DIFFICULTY LEVEL: ${difficulty}
+NUMBER OF QUESTIONS: ${questionCount}
+${scoreContext}
+
+INSTRUCTIONS:
+1. Generate EXACTLY ${questionCount} multiple-choice questions
+2. Each question must have EXACTLY 4 options
+3. Only ONE correct answer per question
+4. Questions should be diverse and non-repetitive
+5. Ensure correct answers are randomly distributed among positions
+6. Focus on: ${difficultyGuide[difficulty]}
+
+CRITICAL REQUIREMENTS:
+- Return ONLY valid JSON array
+- NO markdown code blocks (no \`\`\`json)
+- NO extra text before or after JSON
+- NO explanations or comments
+- Each option must be plain text (not starting with A, B, C, D)
+
+Return only this JSON structure:
+[{"question":"?","options":["opt1","opt2","opt3","opt4"],"correctAnswer":"correct","difficulty":"${difficulty}"}]
+
+Generate ${questionCount} questions now as pure JSON:`;
+
+    console.log(`[QUIZ] Generating ${questionCount} ${difficulty} questions for: ${topicName}`);
     
-Topic: ${topicName}
-Quiz Context (defined by the teacher): ${quizContext}
-Difficulty Level: ${difficulty} - Focus on ${difficultyGuide[difficulty]}
-Number of Questions: ${questionCount}
 
-${previousScores.length > 0 ? `Student's previous scores on this topic: ${previousScores.join(', ')}. Adjust difficulty accordingly.` : ''}
-
-Generate exactly ${questionCount} multiple-choice questions. Each question must have exactly 4 options with only one correct answer.
-
-IMPORTANT: Return ONLY a valid JSON array. No markdown, no code blocks, no explanation. Just the raw JSON array.
-
-Format:
-[
-  {
-    "question": "Question text here?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correctAnswer": "The exact text of the correct option",
-    "difficulty": "${difficulty}"
-  }
-]
-
-Make each question unique, educational, and challenging at the ${difficulty} level. Ensure correct answers are distributed randomly among the options (not always the same position).`;
-
-    console.log(`Generating quiz for topic: ${topicName} with difficulty: ${difficulty}`);
-    let text = await generateWithFallback(prompt);
-    console.log('Gemini raw response length:', text.length);
+    console.log(`[QUIZ] Generating ${questionCount} ${difficulty} questions for: ${topicName}`);
     
-    // Robustly extract just the JSON array, ignoring any conversational text
-    const jsonMatch = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    if (!jsonMatch) {
-      console.error('AI response did not contain JSON array. Raw response:', text.substring(0, 500));
-      throw new Error('AI did not return a valid JSON array');
+    const response = await generateWithOpenRouter(prompt, 'json');
+    console.log(`[QUIZ] Received response (${response.length} chars)`);
+
+    // Extract and parse JSON
+    const questions = extractJSON(response, true);
+
+    // Validate response structure
+    if (!Array.isArray(questions)) {
+      throw new Error('Response is not a JSON array');
     }
-    
-    const questions = JSON.parse(jsonMatch[0]);
-    console.log(`Successfully parsed ${questions.length} questions`);
 
-    // Validate structure
-    if (!Array.isArray(questions) || questions.length === 0) {
-      throw new Error('Invalid quiz format received from AI');
+    if (questions.length === 0) {
+      throw new Error('No questions returned');
     }
 
-    // Validate each question
-    return questions.map(q => ({
-      question: q.question,
-      options: q.options,
-      correctAnswer: q.correctAnswer,
-      difficulty: q.difficulty || difficulty,
-    }));
+    if (questions.length !== questionCount) {
+      console.warn(`[QUIZ] Expected ${questionCount} questions but got ${questions.length}`);
+    }
+
+    // Validate and sanitize each question
+    const validatedQuestions = questions.map((q, index) => {
+      if (!q.question || typeof q.question !== 'string') {
+        throw new Error(`Question ${index + 1}: Missing or invalid question text`);
+      }
+
+      if (!Array.isArray(q.options) || q.options.length !== 4) {
+        throw new Error(`Question ${index + 1}: Must have exactly 4 options`);
+      }
+
+      if (!q.correctAnswer || typeof q.correctAnswer !== 'string') {
+        throw new Error(`Question ${index + 1}: Missing or invalid correct answer`);
+      }
+
+      if (!q.options.includes(q.correctAnswer)) {
+        throw new Error(`Question ${index + 1}: Correct answer not in options`);
+      }
+
+      return {
+        question: q.question.trim(),
+        options: q.options.map(o => String(o).trim()),
+        correctAnswer: q.correctAnswer.trim(),
+        difficulty: q.difficulty || difficulty,
+      };
+    });
+
+    console.log(`[QUIZ] ✓ Successfully generated and validated ${validatedQuestions.length} questions`);
+    return validatedQuestions;
+
   } catch (error) {
-    console.error('Gemini quiz generation error:', error.message);
+    console.error(`[QUIZ] ✗ Error: ${error.message}`);
+    
+    if (error.message.includes('Gemini API failed')) {
+      throw new Error('AI service temporarily unavailable. Please try again in 30 seconds.');
+    }
+    
     throw new Error(error.message || 'Failed to generate quiz. Please try again.');
   }
 };
@@ -71,56 +135,183 @@ Make each question unique, educational, and challenging at the ${difficulty} lev
 /**
  * AI Tutor - Answer student questions about a topic
  */
-const askAITutor = async ({ topicName, quizContext, question, chatHistory = [] }) => {
+const askAITutor = async ({
+  topicName = 'General',
+  quizContext = '',
+  question = '',
+  chatHistory = [],
+}) => {
   try {
-    const historyContext = chatHistory.length > 0
-      ? `\nPrevious conversation:\n${chatHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`
-      : '';
+    if (!question || question.trim().length === 0) {
+      throw new Error('Question cannot be empty');
+    }
 
-    const prompt = `You are an AI tutor helping a university student learn about "${topicName}".
+    const maxHistoryLength = 5;
+    const recentHistory = chatHistory.slice(-maxHistoryLength);
     
-Topic Context: ${quizContext}
+    let historyContext = '';
+    if (recentHistory.length > 0) {
+      historyContext = '\nPrevious conversation context:\n' +
+        recentHistory
+          .map(m => `${m.role === 'user' ? 'Student' : 'Tutor'}: ${m.content}`)
+          .join('\n');
+    }
+
+    const prompt = `You are an expert AI tutor helping students learn about "${topicName}".
+
+${quizContext ? `TOPIC CONTEXT: ${quizContext}` : 'GENERAL KNOWLEDGE MODE'}
 ${historyContext}
 
-Student's Question: ${question}
+STUDENT'S CURRENT QUESTION: ${question}
 
-Provide a clear, educational, and helpful response. Use examples when helpful. Keep the response concise but thorough. If the question is not related to the topic, politely redirect the student to ask about the topic.`;
+INSTRUCTIONS:
+1. Provide a clear, educational, and helpful response
+2. Use examples when they help explain concepts
+3. Keep the response concise but thorough (2-4 paragraphs)
+4. If the question is off-topic, gently redirect to the subject
+5. Use a friendly, encouraging tone
+6. Avoid overly technical jargon unless necessary
 
-    console.log(`AI Tutor question for topic: ${topicName}`);
-    const response = await generateWithFallback(prompt);
-    console.log('AI Tutor response received, length:', response.length);
-    return response;
+Respond naturally and helpfully:`;
+
+    console.log(`[TUTOR] Answering question on ${topicName}: "${question.substring(0, 50)}..."`);
+    
+    const response = await generateWithOpenRouter(prompt, 'text');
+    
+    if (!response || response.trim().length === 0) {
+      throw new Error('Empty response from AI');
+    }
+
+    console.log(`[TUTOR] ✓ Response generated (${response.length} chars)`);
+    return response.trim();
+
   } catch (error) {
-    console.error('AI Tutor error:', error.message);
-    throw new Error(error.message || 'AI Tutor is temporarily unavailable. Please try again.');
+    console.error(`[TUTOR] ✗ Error: ${error.message}`);
+    
+    if (error.message.includes('Gemini API failed')) {
+      throw new Error('AI Tutor is temporarily unavailable. Please try again later.');
+    }
+    
+    throw new Error(error.message || 'Failed to get AI response. Please try again.');
   }
 };
 
 /**
- * Generate teacher recommendations based on class performance
+ * Generate teacher recommendations based on class performance analytics
  */
-const generateTeacherRecommendations = async ({ topicName, passRate, avgScore, totalAttempts }) => {
+const generateTeacherRecommendations = async ({
+  topicName = 'General',
+  passRate = 0,
+  avgScore = 0,
+  totalAttempts = 0,
+  commonMistakes = [],
+}) => {
   try {
-    const prompt = `You are an educational analytics AI. Analyze this class performance data and provide actionable recommendations for the teacher.
+    const commonMistakesText = commonMistakes.length > 0
+      ? `Common mistakes: ${commonMistakes.slice(0, 3).join(', ')}`
+      : '';
 
-Topic: ${topicName}
-Pass Rate: ${passRate}%
-Average Score: ${avgScore}/10
-Total Attempts: ${totalAttempts}
+    const prompt = `You are an educational analytics AI helping teachers improve student learning.
 
-Provide 2-3 concise, actionable recommendations. Return as a JSON array of strings.
-Example: ["Recommendation 1", "Recommendation 2"]
+TOPIC: ${topicName}
+CLASS STATISTICS:
+- Pass Rate: ${passRate}%
+- Average Score: ${avgScore}/10
+- Total Attempts: ${totalAttempts}
+${commonMistakesText}
 
-Return ONLY the JSON array, no markdown or code blocks.`;
+Generate 2-3 specific, actionable recommendations for the teacher to improve student performance.
 
-    let text = await generateWithFallback(prompt);
-    text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : ['Unable to parse recommendations.'];
+CRITICAL: Return ONLY a valid JSON array of strings. No markdown or code blocks.
+
+FORMAT:
+[
+  "Recommendation 1 - Be specific about actions to take",
+  "Recommendation 2 - Include what to focus on",
+  "Recommendation 3 - Optional additional insight"
+]
+
+Generate recommendations now:`;
+
+    console.log(`[RECOMMENDATIONS] Analyzing ${topicName} (Pass: ${passRate}%, Avg: ${avgScore})`);
+    
+    const response = await generateWithOpenRouter(prompt, 'json');
+    const recommendations = extractJSON(response, true);
+
+    if (!Array.isArray(recommendations) || recommendations.length === 0) {
+      throw new Error('Invalid recommendations format');
+    }
+
+    const validated = recommendations
+      .filter(r => typeof r === 'string' && r.trim().length > 0)
+      .map(r => r.trim())
+      .slice(0, 5); // Limit to 5 recommendations
+
+    console.log(`[RECOMMENDATIONS] ✓ Generated ${validated.length} recommendations`);
+    return validated;
+
   } catch (error) {
-    console.error('Recommendations error:', error.message);
-    return ['Unable to generate recommendations at this time.'];
+    console.error(`[RECOMMENDATIONS] ✗ Error: ${error.message}`);
+    
+    // Return sensible defaults if AI fails
+    const defaults = [];
+    if (passRate < 60) {
+      defaults.push('Consider reviewing fundamental concepts as class average is below 60%');
+    }
+    if (avgScore < 5) {
+      defaults.push('Implement additional practice sessions for this topic');
+    }
+    if (totalAttempts < 3) {
+      defaults.push('Encourage more students to attempt the quiz for better learning');
+    }
+    
+    return defaults.length > 0
+      ? defaults
+      : ['Unable to generate recommendations at this time. Try again later.'];
   }
 };
 
-module.exports = { generateQuiz, askAITutor, generateTeacherRecommendations };
+/**
+ * Advanced: Generate detailed learning path recommendations
+ */
+const generateLearningPathAnalysis = async ({
+  studentProgress = {},
+  completedTopics = [],
+  weakAreas = [],
+}) => {
+  try {
+    const prompt = `You are an AI learning path advisor for computer science students.
+
+STUDENT PROGRESS:
+- Completed Topics: ${completedTopics.join(', ') || 'None yet'}
+- Weak Areas: ${weakAreas.join(', ') || 'None identified'}
+- Performance: ${JSON.stringify(studentProgress).substring(0, 200)}
+
+Provide 2-3 specific next steps the student should take to improve their learning.
+
+CRITICAL: Return ONLY valid JSON array of strings. No markdown.
+
+FORMAT:
+[
+  "Next step 1",
+  "Next step 2",
+  "Next step 3"
+]
+
+Generate now:`;
+
+    const response = await generateWithOpenRouter(prompt, 'json');
+    return extractJSON(response, true);
+
+  } catch (error) {
+    console.error('[LEARNING_PATH] Error:', error.message);
+    return ['Continue with foundational topics before moving to advanced material'];
+  }
+};
+
+module.exports = {
+  generateQuiz,
+  askAITutor,
+  generateTeacherRecommendations,
+  generateLearningPathAnalysis,
+};

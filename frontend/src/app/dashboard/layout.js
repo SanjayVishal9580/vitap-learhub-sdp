@@ -41,6 +41,7 @@ export default function DashboardLayout({ children }) {
   const params = useParams();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Global Tools State
   const [showAI, setShowAI] = useState(false);
@@ -48,6 +49,15 @@ export default function DashboardLayout({ children }) {
   const [aiChat, setAiChat] = useState([]);
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+
+  // Detect fullscreen mode (quiz is active)
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const [showPomodoro, setShowPomodoro] = useState(false);
   const [pomodoroTime, setPomodoroTime] = useState(25 * 60);
@@ -233,10 +243,12 @@ export default function DashboardLayout({ children }) {
             style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--accent-gradient)', color: '#fff', border: 'none', fontSize: '1.4rem', cursor: 'pointer', boxShadow: 'var(--shadow-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             ⏰
           </button>
-          <button onClick={toggleAITutor}
-            style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--accent-gradient)', color: '#fff', border: 'none', fontSize: '1.4rem', cursor: 'pointer', boxShadow: 'var(--shadow-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            🤖
-          </button>
+          {!isFullscreen && (
+            <button onClick={toggleAITutor}
+              style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--accent-gradient)', color: '#fff', border: 'none', fontSize: '1.4rem', cursor: 'pointer', boxShadow: 'var(--shadow-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              🤖
+            </button>
+          )}
         </div>
 
         {/* Pomodoro Timer Window */}
@@ -287,7 +299,7 @@ export default function DashboardLayout({ children }) {
         )}
 
         {/* AI Tutor Window */}
-        {showAI && (
+        {showAI && !isFullscreen && (
           <div style={{ 
             position: 'fixed', bottom: aiMaximized ? 24 : 100, right: aiMaximized ? 24 : 92, 
             width: aiMaximized ? 'calc(100% - 48px)' : 360, height: aiMaximized ? 'calc(100% - 48px)' : 500, 

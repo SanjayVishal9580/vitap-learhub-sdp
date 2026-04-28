@@ -4,137 +4,358 @@ const Topic = require('../models/Topic');
 const Enrollment = require('../models/Enrollment');
 const QuizAttempt = require('../models/QuizAttempt');
 const { protect, authorize } = require('../middleware/auth');
-const { generateQuiz } = require('../services/geminiService');
+const { generateQuiz, generateTeacherRecommendations } = require('../services/geminiService');
 const { calculateXP, updateUserProgress } = require('../services/xpService');
 
-// @route   POST /api/quizzes/generate
+// ============================================================================
+// QUIZ ROUTES - Production Ready
+// Comprehensive error handling and validation for quiz generation and submission
+// ============================================================================
+
+/**
+ * POST /api/quizzes/generate
+ * Generate a new quiz based on topic context
+ */
 router.post('/generate', protect, authorize('student'), async (req, res) => {
   try {
     const { topicId } = req.body;
-    const topic = await Topic.findById(topicId);
-    if (!topic) return res.status(404).json({ message: 'Topic not found' });
-    if (!topic.enableQuiz) return res.status(400).json({ message: 'Quiz not enabled for this topic' });
 
-    const prevAttempts = await QuizAttempt.find({ studentId: req.user._id, topicId }).sort({ createdAt: -1 }).limit(5);
+    if (!topicId) {
+      return res.status(400).json({
+        message: 'Topic ID is required',
+      });
+    }
+
+    // Fetch topic with error handling
+    const topic = await Topic.findById(topicId);
+    if (!topic) {
+      return res.status(404).json({
+        message: 'Topic not found',
+      });
+    }
+
+    // Check if quiz is enabled
+    if (!topic.enableQuiz) {
+      return res.status(400).json({
+        message: 'Quiz is not enabled for this topic',
+      });
+    }
+
+    // Validate required topic fields
+    if (!topic.topicName || !topic.quizContext) {
+      return res.status(400).json({
+        message: 'Topic is not properly configured for quizzes',
+      });
+    }
+
+    // Get previous attempts for difficulty adjustment
+    const prevAttempts = await QuizAttempt.find({
+      studentId: req.user._id,
+      topicId: topicId,
+    })
+      .sort({ createdAt: -1 })
+      .limit(5);
+
     const previousScores = prevAttempts.map(a => `${a.score}/${a.totalQuestions}`);
+
+    // Determine difficulty based on performance
     let difficulty = 'MEDIUM';
     if (prevAttempts.length > 0) {
       const lastScore = prevAttempts[0].score / prevAttempts[0].totalQuestions;
-      if (lastScore >= 0.8) difficulty = 'HARD';
-      else if (lastScore < 0.5) difficulty = 'EASY';
+      if (lastScore >= 0.8) {
+        difficulty = 'HARD';
+      } else if (lastScore < 0.5) {
+        difficulty = 'EASY';
+      }
     }
 
+    console.log(`[QUIZ] Generating for ${topic.topicName} (${difficulty})`);
+
+    // Generate quiz questions
     const questions = await generateQuiz({
       topicName: topic.topicName,
       quizContext: topic.quizContext,
-      difficulty,
+      difficulty: difficulty,
       questionCount: 10,
-      previousScores,
+      previousScores: previousScores,
     });
 
-    res.json({ questions, difficulty, topicName: topic.topicName });
+    // Return quiz with metadata
+    res.json({
+      success: true,
+      questions: questions,
+      difficulty: difficulty,
+      topicName: topic.topicName,
+      totalQuestions: questions.length,
+      timestamp: new Date(),
+    });
+
   } catch (error) {
-    console.error('Quiz generation error:', error);
-    res.status(500).json({ message: error.message || 'Failed to generate quiz' });
+    console.error('[QUIZ] Generation error:', error.message);
+
+    // Rate limiting or service unavailable
+    if (error.message.includes('rate') || error.message.includes('temporarily')) {
+      return res.status(503).json({
+        message: 'Quiz service is temporarily unavailable. Please try again in a moment.',
+        error: error.message,
+      });
+    }
+
+    res.status(500).json({
+      message: error.message || 'Failed to generate quiz',
+      error: error.message,
+    });
   }
 });
 
-// @route   POST /api/quizzes/submit
+/**
+ * POST /api/quizzes/submit
+ * Submit completed quiz and record results
+ */
 router.post('/submit', protect, authorize('student'), async (req, res) => {
   try {
-    const { topicId, courseId, teacherId, questions, tabSwitches, fullscreenExits, timeTaken, isPractice } = req.body;
+    const {
+      topicId,
+      courseId,
+      teacherId,
+      questions,
+      tabSwitches = 0,
+      fullscreenExits = 0,
+      timeTaken = 0,
+      isPractice = false,
+    } = req.body;
 
+    // Validate required fields
+    if (!topicId || !courseId || !teacherId || !Array.isArray(questions)) {
+      return res.status(400).json({
+        message: 'Missing required quiz submission data',
+      });
+    }
+
+    if (questions.length === 0) {
+      return res.status(400).json({
+        message: 'No questions to submit',
+      });
+    }
+
+    // Validate question structure - only require correctAnswer, studentAnswer can be empty (for violation submissions)
+    const invalidQuestions = questions.filter(q => !q.correctAnswer);
+    if (invalidQuestions.length > 0) {
+      return res.status(400).json({
+        message: 'Some questions have invalid data',
+      });
+    }
+
+    // Calculate score
     let score = 0;
     const graded = questions.map(q => {
-      const isCorrect = q.studentAnswer === q.correctAnswer;
+      const isCorrect = String(q.studentAnswer).trim() === String(q.correctAnswer).trim();
       if (isCorrect) score++;
-      return { ...q, isCorrect };
+      return {
+        ...q,
+        isCorrect: isCorrect,
+      };
     });
 
-    const passed = score >= 5;
+    const totalQuestions = questions.length;
+    const passed = score >= Math.ceil(totalQuestions * 0.5); // 50% pass rate
+
+    // Check for suspicious activity
     let flagged = false;
     let flagReason = '';
-    if (tabSwitches > 1 || fullscreenExits > 1 || (timeTaken < 60 && score >= 8)) {
+
+    if (tabSwitches > 2 || fullscreenExits > 2) {
       flagged = true;
       const reasons = [];
-      if (tabSwitches > 1) reasons.push(`Tab switches: ${tabSwitches}`);
-      if (fullscreenExits > 1) reasons.push(`Fullscreen exits: ${fullscreenExits}`);
-      if (timeTaken < 60 && score >= 8) reasons.push(`Suspiciously fast: ${timeTaken}s`);
+      if (tabSwitches > 2) reasons.push(`Tab switches: ${tabSwitches}`);
+      if (fullscreenExits > 2) reasons.push(`Fullscreen exits: ${fullscreenExits}`);
       flagReason = reasons.join('; ');
     }
 
-    const difficulty = questions[0]?.difficulty || 'MEDIUM';
-    const xpAwarded = (!isPractice && passed && !flagged) ? calculateXP(score, 10, difficulty) : 0;
+    // Check for unusually fast completion (less than 30 seconds with high score)
+    if (timeTaken < 30 && score >= totalQuestions * 0.9) {
+      flagged = true;
+      flagReason = (flagReason ? flagReason + '; ' : '') + `Suspiciously fast: ${timeTaken}s`;
+    }
 
+    // Determine difficulty from questions
+    const difficulty = questions[0]?.difficulty || 'MEDIUM';
+
+    // Calculate XP awarded
+    const xpAwarded = !isPractice && passed && !flagged
+      ? calculateXP(score, totalQuestions, difficulty)
+      : 0;
+
+    // Create quiz attempt record
     const attempt = await QuizAttempt.create({
-      studentId: req.user._id, courseId, teacherId, topicId,
-      questions: graded, score, totalQuestions: 10, difficulty,
-      xpAwarded, tabSwitches: tabSwitches || 0, fullscreenExits: fullscreenExits || 0,
-      timeTaken: timeTaken || 0, flagged, flagReason,
-      status: flagged ? 'SUSPICIOUS' : (passed ? 'PASSED' : 'FAILED'),
-      isPractice: isPractice || false,
+      studentId: req.user._id,
+      courseId: courseId,
+      teacherId: teacherId,
+      topicId: topicId,
+      questions: graded,
+      score: score,
+      totalQuestions: totalQuestions,
+      difficulty: difficulty,
+      xpAwarded: xpAwarded,
+      tabSwitches: tabSwitches,
+      fullscreenExits: fullscreenExits,
+      timeTaken: timeTaken,
+      flagged: flagged,
+      flagReason: flagReason,
+      status: flagged ? 'SUSPICIOUS' : passed ? 'PASSED' : 'FAILED',
+      isPractice: isPractice,
     });
 
     let progressUpdate = null;
+
+    // Update progress only if not practice, passed, and not flagged
     if (!isPractice && passed && !flagged) {
       progressUpdate = await updateUserProgress(req.user._id, xpAwarded);
-      const enrollment = await Enrollment.findOne({ studentId: req.user._id, courseId, teacherId });
+
+      // Update enrollment
+      const enrollment = await Enrollment.findOne({
+        studentId: req.user._id,
+        courseId: courseId,
+        teacherId: teacherId,
+      });
+
       if (enrollment) {
-        const existing = enrollment.completedTopics.find(t => t.topicId.toString() === topicId);
-        if (existing) {
-          existing.attempts += 1;
-          if (score > existing.bestScore) existing.bestScore = score;
+        const existingTopic = enrollment.completedTopics.find(
+          t => t.topicId.toString() === topicId
+        );
+
+        if (existingTopic) {
+          existingTopic.attempts += 1;
+          if (score > existingTopic.bestScore) {
+            existingTopic.bestScore = score;
+          }
         } else {
-          enrollment.completedTopics.push({ topicId, bestScore: score, attempts: 1 });
+          enrollment.completedTopics.push({
+            topicId: topicId,
+            bestScore: score,
+            attempts: 1,
+          });
         }
         await enrollment.save();
       }
     }
 
-    res.json({ attempt, passed, score, xpAwarded, progressUpdate });
+    console.log(
+      `[QUIZ] Submitted: ${req.user._id} scored ${score}/${totalQuestions} on ${topicId}`
+    );
+
+    res.json({
+      success: true,
+      attempt: attempt,
+      passed: passed,
+      score: score,
+      totalQuestions: totalQuestions,
+      xpAwarded: xpAwarded,
+      flagged: flagged,
+      progressUpdate: progressUpdate,
+    });
+
   } catch (error) {
-    console.error('Quiz submit error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('[QUIZ] Submission error:', error.message);
+
+    res.status(500).json({
+      message: error.message || 'Failed to submit quiz',
+      error: error.message,
+    });
   }
 });
 
-// @route   GET /api/quizzes/history/:topicId
+/**
+ * GET /api/quizzes/history/:topicId
+ * Get quiz attempt history for a topic
+ */
 router.get('/history/:topicId', protect, async (req, res) => {
   try {
+    const { topicId } = req.params;
+
     const attempts = await QuizAttempt.find({
-      studentId: req.user._id, topicId: req.params.topicId,
-    }).sort({ createdAt: -1 });
-    res.json(attempts);
+      studentId: req.user._id,
+      topicId: topicId,
+    })
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    res.json({
+      attempts: attempts,
+      total: attempts.length,
+    });
+
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('[QUIZ] History error:', error.message);
+
+    res.status(500).json({
+      message: 'Failed to load quiz history',
+      error: error.message,
+    });
   }
 });
 
-// @route   GET /api/quizzes/flagged
+/**
+ * GET /api/quizzes/flagged
+ * Get flagged quiz attempts (admin only)
+ */
 router.get('/flagged', protect, authorize('admin'), async (req, res) => {
   try {
     const flagged = await QuizAttempt.find({ flagged: true })
       .populate('studentId', 'name email')
       .populate('courseId', 'courseCode courseName')
       .populate('topicId', 'topicName')
-      .sort({ createdAt: -1 });
-    res.json(flagged);
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    res.json({
+      flagged: flagged,
+      total: flagged.length,
+    });
+
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('[QUIZ] Flagged retrieval error:', error.message);
+
+    res.status(500).json({
+      message: 'Failed to load flagged quizzes',
+      error: error.message,
+    });
   }
 });
 
-// @route   PUT /api/quizzes/:id/invalidate
+/**
+ * PUT /api/quizzes/:id/invalidate
+ * Invalidate a quiz attempt (admin only)
+ */
 router.put('/:id/invalidate', protect, authorize('admin'), async (req, res) => {
   try {
-    const attempt = await QuizAttempt.findById(req.params.id);
-    if (!attempt) return res.status(404).json({ message: 'Not found' });
+    const { id } = req.params;
+
+    const attempt = await QuizAttempt.findById(id);
+    if (!attempt) {
+      return res.status(404).json({
+        message: 'Quiz attempt not found',
+      });
+    }
+
     attempt.status = 'INVALIDATED';
     attempt.xpAwarded = 0;
     await attempt.save();
-    res.json({ message: 'Quiz invalidated', attempt });
+
+    console.log(`[QUIZ] Invalidated attempt ${id}`);
+
+    res.json({
+      message: 'Quiz invalidated successfully',
+      attempt: attempt,
+    });
+
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('[QUIZ] Invalidate error:', error.message);
+
+    res.status(500).json({
+      message: 'Failed to invalidate quiz',
+      error: error.message,
+    });
   }
 });
 

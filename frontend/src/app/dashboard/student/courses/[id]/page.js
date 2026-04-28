@@ -31,6 +31,8 @@ export default function CourseDetailPage({ params: paramsPromise }) {
   const tabSwitchesRef = useRef(0);
   const fullscreenExitsRef = useRef(0);
   const timeLeftRef = useRef(1800);
+  const autoSubmittedRef = useRef(false);
+  const autoSubmitFunctionRef = useRef(null);
   const router = useRouter();
 
   // --- Anti-Cheating Mode Logic ---
@@ -39,22 +41,61 @@ export default function CourseDetailPage({ params: paramsPromise }) {
 
     let lastViolationTime = 0;
     const recordViolation = (type, msg) => {
+      // Stop recording violations if submission already triggered
+      if (autoSubmittedRef.current) {
+        console.log('[QUIZ] Violation ignored - already submitted');
+        return;
+      }
+
       const now = Date.now();
-      if (now - lastViolationTime < 2000) return; // Debounce violations within 2s
+      if (now - lastViolationTime < 2000) {
+        console.log('[QUIZ] Violation debounced');
+        return;
+      }
       lastViolationTime = now;
 
       if (type === 'tab') {
         tabSwitchesRef.current += 1;
         const count = tabSwitchesRef.current;
         setTabSwitches(count);
-        toast.error(`⚠️ Warning: ${msg} (${count}/2).`, { duration: 4000 });
-        if (count >= 2) handleSubmitQuiz();
+        console.log(`[QUIZ] Tab switch detected: ${count}/2`);
+        
+        if (count > 1) {
+          // Auto-submit immediately when limit exceeded
+          console.log('[QUIZ] Tab switch limit exceeded - triggering auto-submission');
+          autoSubmittedRef.current = true;
+          toast.error(`⚠️ Tab switch limit exceeded! Auto-submitting...`, { duration: 3000 });
+          // Call the latest version of the function from the ref
+          if (autoSubmitFunctionRef.current) {
+            setTimeout(() => {
+              autoSubmitFunctionRef.current();
+            }, 100);
+          }
+        } else {
+          // Show warning for first violation
+          toast.error(`⚠️ Warning: ${msg} (${count}/2).`, { duration: 4000 });
+        }
       } else if (type === 'fullscreen') {
         fullscreenExitsRef.current += 1;
         const count = fullscreenExitsRef.current;
         setFullscreenExits(count);
-        toast.error(`⚠️ Warning: ${msg} (${count}/2).`, { duration: 4000 });
-        if (count >= 2) handleSubmitQuiz();
+        console.log(`[QUIZ] Fullscreen exit detected: ${count}/2`);
+        
+        if (count > 1) {
+          // Auto-submit immediately when limit exceeded
+          console.log('[QUIZ] Fullscreen exit limit exceeded - triggering auto-submission');
+          autoSubmittedRef.current = true;
+          toast.error(`⚠️ Fullscreen exit limit exceeded! Auto-submitting...`, { duration: 3000 });
+          // Call the latest version of the function from the ref
+          if (autoSubmitFunctionRef.current) {
+            setTimeout(() => {
+              autoSubmitFunctionRef.current();
+            }, 100);
+          }
+        } else {
+          // Show warning for first violation
+          toast.error(`⚠️ Warning: ${msg} (${count}/2).`, { duration: 4000 });
+        }
       }
     };
 
@@ -78,12 +119,21 @@ export default function CourseDetailPage({ params: paramsPromise }) {
       toast.error('🚫 Action disabled during quiz');
     };
 
+    const handleKeyDown = (e) => {
+      // Block Escape key to prevent exiting fullscreen
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        toast.error('🚫 Cannot exit fullscreen during quiz');
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('contextmenu', preventCheating);
     document.addEventListener('copy', preventCheating);
     document.addEventListener('paste', preventCheating);
+    document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -92,6 +142,7 @@ export default function CourseDetailPage({ params: paramsPromise }) {
       document.removeEventListener('contextmenu', preventCheating);
       document.removeEventListener('copy', preventCheating);
       document.removeEventListener('paste', preventCheating);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [quizMode]);
 
@@ -167,22 +218,90 @@ export default function CourseDetailPage({ params: paramsPromise }) {
       tabSwitchesRef.current = 0;
       setFullscreenExits(0);
       fullscreenExitsRef.current = 0;
+      autoSubmittedRef.current = false;
       setQuizResult(null);
     } catch (err) { toast.error(err.message || 'Failed to generate quiz'); }
     finally { setQuizLoading(false); }
   };
 
   const startQuizFinal = () => {
+    autoSubmittedRef.current = false;
     setQuizReady(false);
     setQuizMode(true);
     enterFullscreen();
   };
 
-  const handleSubmitQuiz = async () => {
-    if (!quizData || quizLoading) return;
+  // Auto-submit for cheating violations (no validation)
+  const autoSubmitDueToViolation = async () => {
+    console.log('[QUIZ] Auto-submit triggered due to violation');
+    if (!quizData) {
+      console.error('[QUIZ] Cannot submit: quizData is null');
+      toast.error('Error: Quiz data not found');
+      return;
+    }
+    if (quizLoading) {
+      console.warn('[QUIZ] Submission already in progress');
+      return;
+    }
+    
     setQuizLoading(true);
     try {
+      console.log('[QUIZ] Submitting quiz with violations...');
       const currentAnswers = answersRef.current;
+      const questions = quizData.questions.map((q, i) => ({
+        ...q, studentAnswer: currentAnswers[i] || '',
+      }));
+      const isPractice = completedTopicIds.includes(selectedTopic._id);
+      
+      console.log(`[QUIZ] Tab switches: ${tabSwitchesRef.current}, Fullscreen exits: ${fullscreenExitsRef.current}`);
+      
+      const result = await submitQuiz({
+        topicId: selectedTopic._id, courseId, teacherId,
+        questions, tabSwitches: tabSwitchesRef.current, fullscreenExits: fullscreenExitsRef.current,
+        timeTaken: 1800 - timeLeftRef.current, isPractice,
+      });
+      
+      console.log('[QUIZ] Submission successful:', result);
+      setQuizResult(result);
+      setQuizMode(false);
+      exitFullscreen();
+      
+      if (result.passed && !isPractice) {
+        setCompletedTopicIds([...completedTopicIds, selectedTopic._id]);
+        checkAuth();
+      }
+      
+      toast.success('Quiz submitted due to suspicious activity', { duration: 3000 });
+    } catch (err) { 
+      console.error('[QUIZ] Auto-submission failed:', err.message);
+      toast.error(`Submission failed: ${err.message}`); 
+    } finally { 
+      setQuizLoading(false); 
+    }
+  };
+
+  // Register the auto-submit function in a ref so event listeners always have the latest version
+  useEffect(() => {
+    autoSubmitFunctionRef.current = autoSubmitDueToViolation;
+  }, [autoSubmitDueToViolation, quizData, selectedTopic, courseId, teacherId, completedTopicIds]);
+
+  const handleSubmitQuiz = async () => {
+    if (!quizData) return;
+    
+    // Check if all questions have been answered
+    const currentAnswers = answersRef.current;
+    const unansweredCount = quizData.questions.filter((_, i) => !currentAnswers[i]).length;
+    
+    if (unansweredCount > 0) {
+      toast.error(`⚠️ Please answer all ${unansweredCount} unanswered question(s) before submitting!`);
+      return;
+    }
+    
+    // Prevent duplicate submissions
+    if (quizLoading) return;
+    
+    setQuizLoading(true);
+    try {
       const questions = quizData.questions.map((q, i) => ({
         ...q, studentAnswer: currentAnswers[i] || '',
       }));

@@ -1,90 +1,264 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-let genAIInstance = null;
+// ============================================================================
+// GEMINI API CONFIGURATION - PRODUCTION READY
+// ============================================================================
 
-const getGenAI = () => {
-  if (!genAIInstance) {
-    const key = (process.env.GEMINI_API_KEY || '').trim();
-    if (!key) {
-      require('dotenv').config();
-    }
-    const finalKey = (process.env.GEMINI_API_KEY || '').trim();
-    if (!finalKey) {
-      console.error('CRITICAL: GEMINI_API_KEY is missing from environment variables!');
-    }
-    genAIInstance = new GoogleGenerativeAI(finalKey);
-    console.log('Gemini SDK Initialized with key:', finalKey ? `${finalKey.substring(0, 5)}...` : 'MISSING');
+let keyIndex = 0;
+const REQUEST_TIMEOUT = 60000; // 60 seconds timeout
+const RETRY_DELAYS = [1000, 2000, 4000, 8000]; // Exponential backoff delays
+
+/**
+ * Get and validate Gemini API keys from environment
+ */
+const getKeys = () => {
+  const rawKeys = (process.env.GEMINI_API_KEY || '')
+    .split(',')
+    .map(k => k.trim())
+    .filter(k => k);
+  
+  if (rawKeys.length === 0) {
+    throw new Error('CRITICAL: No GEMINI_API_KEY found in environment variables!');
   }
-  return genAIInstance;
-};
-
-// Models to try in order of preference
-const MODEL_FALLBACKS = [
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-pro',
-  'gemini-3.1-flash-lite-preview',
-  'gemini-2.0-flash',
-  'gemini-flash-latest',
-  'gemini-pro-latest',
-];
-
-const getGeminiModel = (modelName) => {
-  const name = modelName || MODEL_FALLBACKS[0];
-  return getGenAI().getGenerativeModel({ model: name });
+  
+  return rawKeys;
 };
 
 /**
- * Sleep for ms milliseconds
+ * Rotate to next API key (for rate limiting)
+ */
+const rotateKey = () => {
+  try {
+    const keys = getKeys();
+    if (keys.length > 1) {
+      keyIndex = (keyIndex + 1) % keys.length;
+      console.log(`[GEMINI] Rotating to API key #${keyIndex + 1}/${keys.length}`);
+      return true;
+    }
+  } catch (error) {
+    console.error('[GEMINI] Key rotation failed:', error.message);
+  }
+  return false;
+};
+
+/**
+ * Get initialized Gemini AI instance with current API key
+ */
+const getGenAI = () => {
+  try {
+    const keys = getKeys();
+    const currentKey = keys[keyIndex];
+    
+    if (!currentKey) {
+      throw new Error('No valid API key available');
+    }
+    
+    return new GoogleGenerativeAI(currentKey);
+  } catch (error) {
+    console.error('[GEMINI] Failed to initialize GoogleGenerativeAI:', error.message);
+    throw error;
+  }
+};
+
+/**
+ * Primary models to use (in order of preference)
+ * Using latest stable Gemini models
+ */
+const MODELS = [
+  'gemini-2.0-flash',
+  'gemini-1.5-flash'
+];
+
+/**
+ * Sleep utility function
  */
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Try generating content with automatic model fallback and retry logic.
- * Handles 404 (model not found), 503 (overloaded), and 429 (rate limited).
+ * Create a timeout promise that rejects after specified milliseconds
  */
-const generateWithFallback = async (prompt) => {
+const createTimeoutPromise = (ms) => {
+  return new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Request timeout after ${ms}ms`)), ms)
+  );
+};
+
+/**
+ * Check if error is retryable
+ */
+const isRetryableError = (error) => {
+  const status = error.status || error.httpStatusCode;
+  
+  // Retryable status codes
+  const retryableCodes = [429, 500, 502, 503, 504];
+  if (retryableCodes.includes(status)) {
+    return true;
+  }
+  
+  // Retryable error messages
+  const retryableMessages = [
+    'RESOURCE_EXHAUSTED',
+    'INTERNAL',
+    'UNAVAILABLE',
+    'DEADLINE_EXCEEDED',
+    'ECONNRESET',
+    'ENOTFOUND',
+    'timeout'
+  ];
+  
+  return retryableMessages.some(msg => error.message.includes(msg));
+};
+
+/**
+ * Main content generation function with full error handling
+ * 
+ * @param {string} prompt - The prompt to send to Gemini
+ * @param {string} contentType - 'text' or 'json' to indicate expected response format
+ * @returns {Promise<string>} The generated content
+ */
+const generateWithFallback = async (prompt, contentType = 'text') => {
   let lastError = null;
-
-  for (const model of MODEL_FALLBACKS) {
-    // Try each model up to 2 times (with a delay on 429)
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        // Create fresh instance if needed (or just use genAI)
-        const genModel = getGenAI().getGenerativeModel({ model: model.trim() });
-        const result = await genModel.generateContent(prompt);
-        const response = await result.response;
-        console.log(`✓ Gemini response from model: ${model} (attempt ${attempt + 1})`);
-        return response.text();
-      } catch (error) {
-        lastError = error;
-        const status = error.status || error.httpStatusCode;
-        const msg = error.message?.substring(0, 120) || 'Unknown error';
-        console.warn(`✗ Model ${model} attempt ${attempt + 1} failed [${status}]: ${msg}`);
-
-        if (status === 404 || status === 400) {
-          // Model not found or invalid request — skip to next model immediately
-          break;
-        } else if (status === 429) {
-          // Rate limited — wait and retry with same model, then try next
-          if (attempt === 0) {
-            console.log(`  ↳ Rate limited on ${model}, waiting 5s before retry...`);
-            await sleep(5000);
-            continue;
+  
+  try {
+    const keys = getKeys();
+    console.log(`[GEMINI] Starting generation with ${keys.length} key(s) and ${MODELS.length} model(s)`);
+    
+    // Outer loop: retry with keys
+    for (let keyAttempt = 0; keyAttempt < Math.max(keys.length, 1); keyAttempt++) {
+      // Inner loop: retry with backoff
+      for (let retryAttempt = 0; retryAttempt < RETRY_DELAYS.length; retryAttempt++) {
+        // Model loop: try different models
+        for (const modelName of MODELS) {
+          try {
+            console.log(`[GEMINI] Attempt ${keyAttempt + 1}/${keys.length} | Retry ${retryAttempt + 1}/${RETRY_DELAYS.length} | Model: ${modelName}`);
+            
+            const genAI = getGenAI();
+            const model = genAI.getGenerativeModel({
+              model: modelName,
+              // Configuration for more reliable responses
+              generationConfig: {
+                temperature: 0.7,
+                topP: 0.95,
+                topK: 40,
+                maxOutputTokens: 4096,
+              },
+              safetySettings: [
+                {
+                  category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+                  threshold: 'BLOCK_ONLY_HIGH',
+                },
+                {
+                  category: 'HARM_CATEGORY_UNSPECIFIED',
+                  threshold: 'BLOCK_ONLY_HIGH',
+                },
+              ],
+            });
+            
+            // Race against timeout
+            const generationPromise = model.generateContent(prompt);
+            const result = await Promise.race([
+              generationPromise,
+              createTimeoutPromise(REQUEST_TIMEOUT),
+            ]);
+            
+            const response = await result.response;
+            const text = response.text();
+            
+            if (!text || text.trim().length === 0) {
+              throw new Error('Empty response from Gemini');
+            }
+            
+            console.log(`[GEMINI] ✓ Success with ${modelName} (${text.length} chars)`);
+            return text;
+            
+          } catch (error) {
+            lastError = error;
+            const status = error.status || error.httpStatusCode;
+            
+            console.warn(
+              `[GEMINI] ✗ Failed with ${modelName}: ${error.message.substring(0, 100)}` +
+              (status ? ` [Status: ${status}]` : '')
+            );
+            
+            // Model not found - try next model
+            if (status === 404 || error.message.includes('not found')) {
+              console.log(`[GEMINI]   → Model not found, trying next model...`);
+              continue; // Try next model
+            }
+            
+            // Bad request - don't retry
+            if (status === 400 || error.message.includes('INVALID_ARGUMENT')) {
+              console.log(`[GEMINI]   → Invalid request, not retrying`);
+              throw error;
+            }
+            
+            // Rate limited - rotate key
+            if (status === 429 || error.message.includes('RESOURCE_EXHAUSTED')) {
+              console.log(`[GEMINI]   → Rate limited`);
+              if (keyAttempt < keys.length - 1) {
+                console.log(`[GEMINI]   → Rotating to next API key...`);
+                rotateKey();
+                break; // Break model loop, try next key
+              }
+            }
+            
+            // Server errors - wait and retry
+            if (isRetryableError(error)) {
+              if (retryAttempt < RETRY_DELAYS.length - 1) {
+                const waitTime = RETRY_DELAYS[retryAttempt];
+                console.log(`[GEMINI]   → Retrying in ${waitTime}ms...`);
+                await sleep(waitTime);
+                break; // Break model loop, retry with backoff
+              }
+            }
           }
-          // After retry failed, try next model
-          break;
-        } else if (status === 503) {
-          // Overloaded — try next model
-          break;
-        } else {
-          // Other error (e.g. invalid API key) — throw immediately
-          throw error;
         }
       }
     }
+    
+  } catch (error) {
+    console.error('[GEMINI] Fatal error:', error.message);
+    lastError = error;
   }
-  throw lastError || new Error('All Gemini models failed. Your API key may have exhausted its daily quota.');
+  
+  // All attempts failed
+  const errorMessage = lastError?.message || 'Unknown error';
+  console.error(`[GEMINI] All generation attempts failed. Last error: ${errorMessage}`);
+  
+  throw new Error(
+    `Gemini API failed: ${errorMessage}. Please try again in a few moments.`
+  );
 };
 
-module.exports = { getGenAI, getGeminiModel, generateWithFallback };
+/**
+ * Safe JSON extraction from text response
+ * Handles various JSON formats in API responses
+ */
+const extractJSON = (text, isArray = true) => {
+  try {
+    // Try direct parsing first
+    return JSON.parse(text);
+  } catch (e) {
+    // Try to find JSON in the response
+    const jsonRegex = isArray ? /\[\s*\{[\s\S]*?\}\s*\]/g : /\{\s*[\s\S]*?\}/g;
+    const matches = text.match(jsonRegex);
+    
+    if (matches && matches.length > 0) {
+      try {
+        return JSON.parse(matches[0]);
+      } catch (parseError) {
+        console.error('[GEMINI] Failed to parse extracted JSON:', parseError.message);
+        throw new Error('Invalid JSON format in response');
+      }
+    }
+    
+    throw new Error('No JSON found in response');
+  }
+};
+
+module.exports = {
+  getGenAI,
+  generateWithFallback,
+  extractJSON,
+  sleep,
+};

@@ -1,31 +1,21 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
-import { getMyEnrolled, getCourses, getCoursePapers, uploadPaper } from '@/lib/api';
+import { getMyEnrolled, getCoursePapers, uploadPaper } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 export default function TeacherPapersPage() {
   const [courses, setCourses] = useState([]);
-  const [allCourses, setAllCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState('manage');
   
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ year: new Date().getFullYear(), examCategory: 'CAT-1', description: '' });
   const fileRef = useRef(null);
 
-  useEffect(() => { 
-    Promise.all([getMyEnrolled(), getCourses()])
-      .then(([myCourses, allCoursesData]) => {
-        setCourses(myCourses);
-        setAllCourses(allCoursesData);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+  useEffect(() => { getMyEnrolled().then(setCourses).catch(console.error).finally(() => setLoading(false)); }, []);
 
   const loadPapers = async (courseId) => {
     setSelectedCourse(courseId);
@@ -67,23 +57,15 @@ export default function TeacherPapersPage() {
 
   if (loading) return <div className="loading-page"><div className="spinner"></div></div>;
 
-  const filtered = (tab === 'manage' ? courses : allCourses).filter(c => c.courseName.toLowerCase().includes(search.toLowerCase()) || c.courseCode.toLowerCase().includes(search.toLowerCase()));
+  const filtered = courses.filter(c => c.courseName.toLowerCase().includes(search.toLowerCase()) || c.courseCode.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="animate-fade">
       <h1 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: 24 }}>📄 Manage Past Papers</h1>
-      <div className="tabs">
-        <button className={`tab ${tab === 'manage' ? 'active' : ''}`} onClick={() => { setTab('manage'); setSelectedCourse(null); setPapers([]); }}>
-          Manage My Papers
-        </button>
-        <button className={`tab ${tab === 'browse' ? 'active' : ''}`} onClick={() => { setTab('browse'); setSelectedCourse(null); setPapers([]); }}>
-          Browse All Papers
-        </button>
-      </div>
 
       {!selectedCourse ? (
         <>
-          <input type="text" className="form-input" placeholder={tab === 'manage' ? 'Search your courses...' : 'Search courses...'} value={search}
+          <input type="text" className="form-input" placeholder="Search your courses..." value={search}
             onChange={(e) => setSearch(e.target.value)} style={{ maxWidth: 400, marginBottom: 20 }} />
           <div className="grid-3">
             {filtered.map(c => (
@@ -98,7 +80,7 @@ export default function TeacherPapersPage() {
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
             <button className="btn btn-secondary btn-sm" onClick={() => { setSelectedCourse(null); setPapers([]); }}>← Back to Courses</button>
-            {tab === 'manage' && <button className="btn btn-primary btn-sm" onClick={() => setShowUpload(true)}>+ Upload Paper</button>}
+            <button className="btn btn-primary btn-sm" onClick={() => setShowUpload(true)}>+ Upload Paper</button>
           </div>
           
           {Object.keys(grouped).length === 0 ? (
@@ -116,25 +98,30 @@ export default function TeacherPapersPage() {
                           <div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                               <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{p.fileName || 'Paper'}</span>
-                              {tab === 'manage' && <span className={`badge ${p.status === 'approved' ? 'badge-success' : p.status === 'rejected' ? 'badge-danger' : 'badge-info'}`} style={{fontSize: '0.7rem'}}>{p.status}</span>}
+                              <span className={`badge ${p.status === 'approved' ? 'badge-success' : p.status === 'rejected' ? 'badge-danger' : 'badge-info'}`} style={{fontSize: '0.7rem'}}>{p.status}</span>
                             </div>
                             {p.description && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{p.description}</span>}
                           </div>
                           <div style={{ display: 'flex', gap: 8 }}>
                             {(() => {
-                              const isPdf = p.fileUrl?.toLowerCase().endsWith('.pdf') || p.fileName?.toLowerCase().endsWith('.pdf');
-                              const isOffice = p.fileName && p.fileName.toLowerCase().match(/\.(docx|pptx|xlsx)$/);
+                              const FileUrl = p.fileUrl || '';
+                              const FileName = p.fileName || '';
+                              const isPdf = FileUrl.toLowerCase().endsWith('.pdf') || FileName.toLowerCase().endsWith('.pdf');
+                              const isOffice = FileName.toLowerCase().match(/\.(docx|pptx|xlsx)$/);
                               
                               let viewUrl;
                               if (isPdf) {
-                                viewUrl = p.fileUrl;
+                                viewUrl = FileUrl;
                               } else if (isOffice) {
-                                viewUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(p.fileUrl)}`;
+                                viewUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(FileUrl)}`;
                               } else {
-                                viewUrl = `https://docs.google.com/gview?url=${encodeURIComponent(p.fileUrl)}&embedded=true`;
+                                viewUrl = `https://docs.google.com/gview?url=${encodeURIComponent(FileUrl)}&embedded=true`;
                               }
-                              
-                              const downloadUrl = p.fileUrl?.includes('/upload/') ? p.fileUrl.replace('/upload/', '/upload/fl_attachment/') : p.fileUrl;
+
+                              let downloadUrl = FileUrl;
+                              if (downloadUrl.includes('/upload/')) {
+                                downloadUrl = downloadUrl.replace('/upload/', '/upload/fl_attachment/');
+                              }
                               
                               return (
                                 <>
@@ -155,7 +142,7 @@ export default function TeacherPapersPage() {
         </>
       )}
 
-      {tab === 'manage' && showUpload && (
+      {showUpload && (
         <div className="modal-overlay" onClick={() => !uploading && setShowUpload(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">Upload Past Paper</h3>

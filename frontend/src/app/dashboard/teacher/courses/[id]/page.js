@@ -369,7 +369,7 @@ export default function TeacherCourseDetailPage({ params: paramsPromise }) {
               <label htmlFor="enableQuiz" style={{ fontWeight: 600 }}>Enable Quiz Generation</label>
             </div>
             {form.enableQuiz && (
-              <div className="form-group"><label className="form-label">Quiz Context (defines what Gemini quizzes about) *</label>
+              <div className="form-group"><label className="form-label">Quiz Context (defines what OpenRouter AI quizzes about) *</label>
                 <textarea className="form-textarea" value={form.quizContext} onChange={e => setForm({ ...form, quizContext: e.target.value })} placeholder="e.g. Arrays - linear search, binary search, time complexity O(n) vs O(log n)" rows={3}></textarea></div>
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>

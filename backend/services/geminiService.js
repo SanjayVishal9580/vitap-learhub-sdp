@@ -6,7 +6,7 @@ const { generateWithOpenRouter, extractJSON } = require('../config/openrouter');
 // ============================================================================
 
 /**
- * Generate a quiz using Gemini AI
+ * Generate a quiz using OpenRouter AI
  * Returns properly validated quiz questions
  */
 const generateQuiz = async ({
@@ -124,7 +124,7 @@ Generate ${questionCount} questions now as pure JSON:`;
   } catch (error) {
     console.error(`[QUIZ] ✗ Error: ${error.message}`);
     
-    if (error.message.includes('Gemini API failed')) {
+    if (error.message.includes('API failed')) {
       throw new Error('AI service temporarily unavailable. Please try again in 30 seconds.');
     }
     
@@ -188,7 +188,7 @@ Respond naturally and helpfully:`;
   } catch (error) {
     console.error(`[TUTOR] ✗ Error: ${error.message}`);
     
-    if (error.message.includes('Gemini API failed')) {
+    if (error.message.includes('API failed')) {
       throw new Error('AI Tutor is temporarily unavailable. Please try again later.');
     }
     

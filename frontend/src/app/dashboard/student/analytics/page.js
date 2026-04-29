@@ -11,6 +11,7 @@ export default function StudentAnalyticsPage() {
   const [loading, setLoading] = useState(true);
 
   const [selectedAttempt, setSelectedAttempt] = useState(null);
+  const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
     getStudentAnalytics().then(setData).catch(console.error).finally(() => setLoading(false));
@@ -80,7 +81,19 @@ export default function StudentAnalyticsPage() {
           <div className="card animate-slide-in" style={{ height: 'fit-content', position: 'sticky', top: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h3 style={{ margin: 0 }}>Quiz Details</h3>
-              <button onClick={() => setSelectedAttempt(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button 
+                  onClick={() => setMaximized(true)} 
+                  title="Maximize"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '4px 8px' }}>
+                  ⛶
+                </button>
+                <button 
+                  onClick={() => setSelectedAttempt(null)} 
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '4px 8px' }}>
+                  ✕
+                </button>
+              </div>
             </div>
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-muted)' }}>{selectedAttempt.topicId?.topicName}</div>
@@ -110,6 +123,175 @@ export default function StudentAnalyticsPage() {
           </div>
         )}
       </div>
+
+      {/* Maximized Quiz Details Modal */}
+      {maximized && selectedAttempt && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: 20,
+          backdropFilter: 'blur(4px)',
+        }} onClick={() => setMaximized(false)}>
+          <div style={{
+            background: 'var(--bg-primary)',
+            borderRadius: 16,
+            padding: 32,
+            maxWidth: 900,
+            width: '100%',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <div>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: 8 }}>Quiz Details</h2>
+                <div style={{ fontSize: '0.95rem', color: 'var(--text-muted)' }}>
+                  {selectedAttempt.topicId?.topicName} • {selectedAttempt.courseId?.courseCode}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button 
+                  onClick={() => setMaximized(false)} 
+                  title="Minimize"
+                  style={{ 
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    cursor: 'pointer', 
+                    fontSize: '1.2rem',
+                    padding: '8px 12px',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={e => e.target.style.background = 'var(--bg-tertiary)'}
+                  onMouseLeave={e => e.target.style.background = 'var(--bg-secondary)'}
+                >
+                  ⛶
+                </button>
+                <button 
+                  onClick={() => {
+                    setMaximized(false);
+                    setSelectedAttempt(null);
+                  }}
+                  style={{ 
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    cursor: 'pointer', 
+                    fontSize: '1.2rem',
+                    padding: '8px 12px',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={e => e.target.style.background = 'var(--bg-tertiary)'}
+                  onMouseLeave={e => e.target.style.background = 'var(--bg-secondary)'}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Score & Metadata */}
+            <div className="grid-3" style={{ marginBottom: 32, gap: 16 }}>
+              <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 8 }}>Score</div>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: selectedAttempt.status === 'PASSED' ? 'var(--success)' : 'var(--error)' }}>
+                  {selectedAttempt.score}/{selectedAttempt.totalQuestions}
+                </div>
+              </div>
+              <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 8 }}>Status</div>
+                <span className={`badge ${selectedAttempt.status === 'PASSED' ? 'badge-success' : selectedAttempt.status === 'FAILED' ? 'badge-danger' : 'badge-warning'}`}>
+                  {selectedAttempt.status}
+                </span>
+              </div>
+              <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 8 }}>Date</div>
+                <div style={{ fontSize: '0.95rem' }}>{new Date(selectedAttempt.createdAt).toLocaleString()}</div>
+              </div>
+            </div>
+
+            {/* Questions */}
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 16 }}>Questions Review</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {selectedAttempt.questions?.map((q, i) => (
+                <div 
+                  key={i} 
+                  style={{ 
+                    padding: 16, 
+                    borderRadius: 12, 
+                    border: `2px solid ${q.isCorrect ? 'var(--success)' : 'var(--error)'}`, 
+                    background: q.isCorrect ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)' 
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'start', gap: 12, marginBottom: 12 }}>
+                    <div style={{ 
+                      minWidth: 32, 
+                      height: 32, 
+                      borderRadius: 8, 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      fontSize: '0.9rem',
+                      background: q.isCorrect ? 'var(--success)' : 'var(--error)',
+                      color: 'white'
+                    }}>
+                      {q.isCorrect ? '✓' : '✗'}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }} className="markdown-content">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {`Q${i + 1}. ${q.question}`}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
+                      <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}>Your Answer:</span>
+                      <div style={{ 
+                        marginTop: 4, 
+                        padding: 8, 
+                        borderRadius: 6, 
+                        background: 'var(--bg-secondary)',
+                        color: q.isCorrect ? 'var(--success)' : 'var(--error)',
+                        fontWeight: 600
+                      }}>
+                        {q.studentAnswer || '(Skipped)'}
+                      </div>
+                    </div>
+                    {!q.isCorrect && (
+                      <div style={{ fontSize: '0.9rem' }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}>Correct Answer:</span>
+                        <div style={{ 
+                          marginTop: 4, 
+                          padding: 8, 
+                          borderRadius: 6, 
+                          background: 'var(--bg-secondary)',
+                          color: 'var(--success)',
+                          fontWeight: 600
+                        }}>
+                          {q.correctAnswer}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {(!selectedAttempt.questions || selectedAttempt.questions.length === 0) && (
+                <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', padding: 32 }}>
+                  No question details available for this attempt.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Achievements */}
       <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: 32, marginBottom: 16 }}>🏅 Achievements</h2>

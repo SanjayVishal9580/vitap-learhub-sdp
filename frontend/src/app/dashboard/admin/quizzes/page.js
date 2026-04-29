@@ -10,8 +10,12 @@ export default function AdminFlaggedQuizzesPage() {
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
-    try { const data = await getFlaggedQuizzes(); setQuizzes(data); }
-    catch (err) {} finally { setLoading(false); }
+    try {
+      const data = await getFlaggedQuizzes();
+      setQuizzes(Array.isArray(data) ? data : data.quizzes || []);
+    }
+    catch (err) { console.error('Failed to load flagged quizzes:', err); }
+    finally { setLoading(false); }
   };
 
   const handleInvalidate = async (id) => {

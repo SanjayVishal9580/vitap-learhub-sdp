@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { getMyEnrolled, requestCourse, unenrollTeacher, sendMessageToAdmin, getMyAdminMessages } from '@/lib/api';
+import { getMyEnrolled, requestCourse, unenrollTeacher, sendMessageToAdmin, getMyAdminMessages, getTeacherAnalytics } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 export default function TeacherDashboard() {
@@ -10,6 +10,7 @@ export default function TeacherDashboard() {
   const router = useRouter();
   const [myCourses, setMyCourses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState({ totalStudents: 0, totalTopics: 0, avgPassRate: 0, totalAttempts: 0 });
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestForm, setRequestForm] = useState({ courseCode: '', courseName: '', description: '', credits: 3, category: 'Core' });
   const [unenrollTarget, setUnenrollTarget] = useState(null);
@@ -38,6 +39,42 @@ export default function TeacherDashboard() {
       setMyCourses(data);
       const messages = await getMyAdminMessages();
       setAdminMessages(messages);
+
+      // Load analytics for each course and aggregate
+      let totalStudents = 0;
+      let totalTopics = 0;
+      let totalPassRate = 0;
+      let totalAttempts = 0;
+      let courseCount = 0;
+
+      for (const course of data) {
+        try {
+          const courseAnalytics = await getTeacherAnalytics(course._id);
+          totalStudents += courseAnalytics.studentCount || 0;
+          totalTopics += courseAnalytics.topicAnalytics?.length || 0;
+          totalAttempts += courseAnalytics.totalAttempts || 0;
+          
+          // Calculate average pass rate
+          if (courseAnalytics.totalAttempts > 0) {
+            const passed = Object.values(courseAnalytics.distribution || {})
+              .reduce((sum, count, idx) => {
+                const ranges = ['90-100', '80-89', '70-79', '60-69', 'below-60'];
+                return ranges[idx].startsWith('below') ? sum : sum + count;
+              }, 0);
+            totalPassRate += (passed / courseAnalytics.totalAttempts) * 100;
+            courseCount++;
+          }
+        } catch (e) {
+          console.error(`Failed to load analytics for course ${course._id}:`, e.message);
+        }
+      }
+
+      setAnalytics({
+        totalStudents,
+        totalTopics,
+        avgPassRate: courseCount > 0 ? Math.round(totalPassRate / courseCount) : 0,
+        totalAttempts
+      });
     } catch (err) {
       console.error(err);
     } finally {
@@ -90,9 +127,9 @@ export default function TeacherDashboard() {
       <div className="grid-4" style={{ marginBottom: 24 }}>
         {[
           { icon: '📚', value: myCourses.length, label: 'My Courses', color: '#6366f1' },
-          { icon: '👥', value: '-', label: 'Total Students', color: '#10b981' },
-          { icon: '📝', value: '-', label: 'Topics Created', color: '#f59e0b' },
-          { icon: '📊', value: '-', label: 'Avg Pass Rate', color: '#8b5cf6' },
+          { icon: '👥', value: analytics.totalStudents, label: 'Total Students', color: '#10b981' },
+          { icon: '📝', value: analytics.totalTopics, label: 'Topics Created', color: '#f59e0b' },
+          { icon: '📊', value: `${analytics.avgPassRate}%`, label: 'Avg Pass Rate', color: '#8b5cf6' },
         ].map((s, i) => (
           <div key={i} className="stat-card">
             <div className="stat-icon" style={{ background: `${s.color}20`, color: s.color }}>{s.icon}</div>

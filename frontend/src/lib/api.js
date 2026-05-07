@@ -79,6 +79,9 @@ export const createTopic = (formData) =>
 export const getTopics = (courseId, teacherId) =>
   fetch(`${API_URL}/topics/course/${courseId}/teacher/${teacherId}`, { headers: getHeaders() }).then(handleResponse);
 
+export const getCourseTopics = (courseId) =>
+  fetch(`${API_URL}/topics/course/${courseId}`, { headers: getHeaders() }).then(handleResponse);
+
 export const getTopic = (id) =>
   fetch(`${API_URL}/topics/${id}`, { headers: getHeaders() }).then(handleResponse);
 

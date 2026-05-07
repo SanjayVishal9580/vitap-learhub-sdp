@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { getMyEnrolled, requestCourse, unenrollStudent, sendMessageToAdmin, getMyAdminMessages } from '@/lib/api';
+import AITutorChat from '@/components/AITutorChat';
 import toast from 'react-hot-toast';
 import styles from './student.module.css';
 
@@ -341,6 +342,9 @@ export default function StudentDashboard() {
           </div>
         </div>
       )}
+
+      {/* AI Tutor Floating Widget */}
+      <AITutorChat topicName="General" compact={true} />
     </div>
   );
 }

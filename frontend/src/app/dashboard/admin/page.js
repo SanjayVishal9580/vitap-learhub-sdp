@@ -44,6 +44,7 @@ export default function AdminDashboard() {
       <div className="grid-3">
         {[
           { title: 'Course Management', desc: 'Create, edit, and delete courses globally', icon: '📚', href: '/dashboard/admin/courses' },
+          { title: 'Topics Management', desc: 'Edit topics, links, and PPT files', icon: '📖', href: '/dashboard/admin/topics' },
           { title: 'Course Requests', desc: 'Review requested courses from users', icon: '📥', href: '/dashboard/admin/requests' },
           { title: 'User Management', desc: 'View and manage all user roles', icon: '👥', href: '/dashboard/admin/users' },
           { title: 'Paper Approvals', desc: 'Review and approve pending papers', icon: '📄', href: '/dashboard/admin/papers' },

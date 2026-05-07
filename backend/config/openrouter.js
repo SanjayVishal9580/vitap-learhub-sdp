@@ -96,7 +96,7 @@ const generateWithOpenRouter = async (prompt, contentType = 'text') => {
             ],
             temperature: 0.3,
             top_p: 0.95,
-            max_tokens: 4096,
+            max_tokens: 1024,
           },
           {
             headers: {

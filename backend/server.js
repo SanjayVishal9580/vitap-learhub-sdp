@@ -37,10 +37,19 @@ console.log('Configured FRONTEND_URL:', frontendUrl);
 
 const io = new Server(server, {
   cors: {
-    origin: [frontendUrl, frontendUrl.replace(/\/$/, '')],
+    origin: [
+      frontendUrl, 
+      frontendUrl.replace(/\/$/, ''),
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
+    ],
     methods: ['GET', 'POST'],
     credentials: true,
   },
+  transports: ['websocket', 'polling'],
 });
 
 // Middleware

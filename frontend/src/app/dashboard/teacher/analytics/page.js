@@ -3,6 +3,19 @@ import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { getMyEnrolled, getTeacherAnalytics } from '@/lib/api';
 import toast from 'react-hot-toast';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Cell,
+} from 'recharts';
 
 function AnalyticsContent() {
   const [courses, setCourses] = useState([]);
@@ -83,7 +96,89 @@ function AnalyticsContent() {
                   ))}
                 </div>
 
-                {/* Performance Distribution */}
+                {/* Charts Section */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: 24 }}>
+                  {/* Student Performance Overview */}
+                  {analytics.students?.length > 0 && (
+                    <div className="card">
+                      <h3 style={{ marginBottom: 16, fontSize: '1rem', fontWeight: 700 }}>👥 Student Completion Rates</h3>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart
+                          data={analytics.students
+                            .slice(0, 10)
+                            .map(s => ({
+                              name: s.name.split(' ')[0],
+                              completed: s.completedCount || 0,
+                              total: analytics.topicAnalytics?.length || 1,
+                              percentage: Math.round(((s.completedCount || 0) / (analytics.topicAnalytics?.length || 1)) * 100),
+                            }))}
+                          layout="vertical"
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                          <XAxis type="number" stroke="var(--text-muted)" />
+                          <YAxis dataKey="name" type="category" stroke="var(--text-muted)" width={100} />
+                          <Tooltip contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8 }} formatter={(value) => `${value}%`} />
+                          <Bar dataKey="percentage" fill="#6366f1" radius={[0, 8, 8, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
+                  {/* Topic Pass Rates */}
+                  {analytics.topicAnalytics?.length > 0 && (
+                    <div className="card">
+                      <h3 style={{ marginBottom: 16, fontSize: '1rem', fontWeight: 700 }}>🎯 Topic Pass Rates</h3>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart
+                          data={analytics.topicAnalytics.map(t => ({
+                            topic: t.topicName?.substring(0, 15) || 'Unknown',
+                            passRate: t.passRate || 0,
+                            attempts: t.totalAttempts || 0,
+                          }))}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                          <XAxis dataKey="topic" stroke="var(--text-muted)" angle={-45} textAnchor="end" height={80} />
+                          <YAxis stroke="var(--text-muted)" />
+                          <Tooltip contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8 }} formatter={(value) => `${value}%`} />
+                          <Bar dataKey="passRate" fill="#10b981" radius={[8, 8, 0, 0]}>
+                            {analytics.topicAnalytics.map((t, idx) => (
+                              <Cell
+                                key={`cell-${idx}`}
+                                fill={t.passRate >= 75 ? '#10b981' : t.passRate >= 50 ? '#f59e0b' : '#ef4444'}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quiz Attempts Timeline */}
+                {analytics.students?.length > 0 && (
+                  <div className="card">
+                    <h3 style={{ marginBottom: 16, fontSize: '1rem', fontWeight: 700 }}>📊 Class Performance Timeline</h3>
+                    <ResponsiveContainer width="100%" height={280}>
+                      <LineChart
+                        data={analytics.topicAnalytics?.map((t, idx) => ({
+                          topic: t.topicName?.substring(0, 12) || `Topic ${idx + 1}`,
+                          avgScore: t.avgScore || 0,
+                          attempts: t.totalAttempts || 0,
+                        })) || []}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                        <XAxis dataKey="topic" stroke="var(--text-muted)" />
+                        <YAxis stroke="var(--text-muted)" yAxisId="left" />
+                        <YAxis stroke="var(--text-muted)" yAxisId="right" orientation="right" />
+                        <Tooltip contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8 }} />
+                        <Legend />
+                        <Line yAxisId="left" type="monotone" dataKey="avgScore" stroke="#8b5cf6" strokeWidth={2} dot={{ fill: '#8b5cf6', r: 4 }} activeDot={{ r: 6 }} name="Avg Score" />
+                        <Line yAxisId="right" type="monotone" dataKey="attempts" stroke="#f59e0b" strokeWidth={2} dot={{ fill: '#f59e0b', r: 4 }} activeDot={{ r: 6 }} name="Attempts" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
                 <div className="card">
                   <h3 style={{ marginBottom: 20, fontSize: '1rem' }}>Performance Distribution</h3>
                   {Object.entries(analytics.distribution || {}).map(([range, count]) => (

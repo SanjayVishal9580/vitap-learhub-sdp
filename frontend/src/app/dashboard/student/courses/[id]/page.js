@@ -5,6 +5,18 @@ import { getCourse, getTopics, generateQuiz, submitQuiz, getQuizHistory, addComm
 import { useAuth } from '@/context/AuthContext';
 import toast from 'react-hot-toast';
 
+// Add CSS animations
+const animationStyles = `
+  @keyframes pulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+`;
+
 export default function CourseDetailPage({ params: paramsPromise }) {
   const { user, checkAuth } = useAuth();
   const searchParams = useSearchParams();
@@ -26,7 +38,19 @@ export default function CourseDetailPage({ params: paramsPromise }) {
   const [newComment, setNewComment] = useState('');
   const [completedTopicIds, setCompletedTopicIds] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [pomodoroActive, setPomodoroActive] = useState(false);
+  
+  // Floating widgets state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [pomodoroOpen, setPomodoroOpen] = useState(false);
+  const [pomodoroTime, setPomodoroTime] = useState(25); // minutes
+  const [pomodoroRunning, setPomodoroRunning] = useState(false);
+  const [pomodoroRemaining, setPomodoroRemaining] = useState(25 * 60); // seconds
+  const [pomodoroSettings, setPomodoroSettings] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatMaximized, setChatMaximized] = useState(false);
+  
   const answersRef = useRef({});
   const tabSwitchesRef = useRef(0);
   const fullscreenExitsRef = useRef(0);
@@ -358,6 +382,71 @@ export default function CourseDetailPage({ params: paramsPromise }) {
     } catch (err) { toast.error('Failed to delete comment'); }
   };
 
+  // Pomodoro Timer Effect
+  useEffect(() => {
+    if (!pomodoroRunning) return;
+    
+    const interval = setInterval(() => {
+      setPomodoroRemaining(prev => {
+        if (prev <= 1) {
+          setPomodoroRunning(false);
+          toast.success('🍅 Pomodoro session completed! Take a break!', { duration: 5000 });
+          return pomodoroTime * 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [pomodoroRunning, pomodoroTime]);
+
+  // Reset Pomodoro when time changes
+  useEffect(() => {
+    if (!pomodoroRunning) {
+      setPomodoroRemaining(pomodoroTime * 60);
+    }
+  }, [pomodoroTime]);
+
+  // Handle sending chat message
+  const handleSendChat = async () => {
+    if (!chatInput.trim() || !selectedTopic) return;
+    
+    const newMsg = { role: 'user', content: chatInput, timestamp: new Date() };
+    setChatMessages([...chatMessages, newMsg]);
+    setChatInput('');
+    setChatLoading(true);
+    
+    try {
+      const response = await askTutor({ 
+        topicId: selectedTopic._id, 
+        topicName: selectedTopic.topicName,
+        question: chatInput 
+      });
+      const aiMsg = { role: 'assistant', content: response.response, timestamp: new Date() };
+      setChatMessages(prev => [...prev, aiMsg]);
+    } catch (err) {
+      console.error('AI response error:', err);
+      
+      // Show user-friendly error messages
+      let errorMsg = 'Failed to get AI response';
+      if (err.message.includes('OpenRouter API key') || err.message.includes('OPENROUTER_API_KEY')) {
+        errorMsg = '🔑 AI Tutor setup needed: Add OPENROUTER_API_KEY to backend/.env';
+      } else if (err.message.includes('not configured') || err.message.includes('not found')) {
+        errorMsg = '⚙️ AI Tutor not configured. Check OPENROUTER_SETUP.md';
+      } else if (err.message.includes('invalid') || err.message.includes('Unauthorized')) {
+        errorMsg = '❌ Invalid API key. Check your OpenRouter credentials.';
+      } else if (err.message.includes('rate limit') || err.message.includes('429')) {
+        errorMsg = '⏱️ Rate limited. Please wait a moment.';
+      } else if (err.message.includes('temporarily unavailable')) {
+        errorMsg = '🚫 AI service is down. Try again later.';
+      }
+      
+      toast.error(errorMsg);
+      setChatMessages(prev => prev.slice(0, -1)); // Remove user message if error
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   const fmt = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
 
@@ -473,6 +562,7 @@ export default function CourseDetailPage({ params: paramsPromise }) {
 
   return (
     <div className="animate-fade">
+      <style>{animationStyles}</style>
       <div style={{ marginBottom: 24 }}>
         <button className="btn btn-secondary btn-sm" onClick={() => router.back()} style={{marginBottom:16}}>← Back</button>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
@@ -653,6 +743,389 @@ export default function CourseDetailPage({ params: paramsPromise }) {
         </div>
       )}
 
+      {/* Chat Maximized Overlay */}
+      {chatMaximized && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 1000,
+            cursor: 'pointer',
+          }}
+          onClick={() => setChatMaximized(false)}
+        />
+      )}
+
+      {/* Floating Widgets Container */}
+      <div style={{ position: 'fixed', bottom: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 12, zIndex: 1000 }}>
+        
+        {/* Floating Pomodoro Timer */}
+        <div style={{
+          background: 'var(--bg-secondary)',
+          border: '2px solid var(--accent)',
+          borderRadius: 16,
+          padding: pomodoroOpen ? 16 : 12,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          minWidth: pomodoroOpen ? 280 : 'auto',
+          maxWidth: 320,
+          transition: 'all 0.3s ease',
+        }}>
+          {pomodoroOpen ? (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0 }}>⏱️ Pomodoro Timer</h3>
+                <button onClick={() => setPomodoroOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+              </div>
+
+              {pomodoroSettings ? (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: 8 }}>
+                      Session Duration (minutes)
+                    </label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={pomodoroTime}
+                        onChange={(e) => setPomodoroTime(Math.max(1, parseInt(e.target.value) || 1))}
+                        style={{
+                          width: '70px',
+                          padding: '6px 8px',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 6,
+                          fontSize: '0.9rem',
+                        }}
+                      />
+                      <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>minutes</span>
+                    </div>
+                  </div>
+                  <button className="btn btn-primary" style={{ width: '100%', marginBottom: 8 }} onClick={() => setPomodoroSettings(false)}>
+                    Done
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                    <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--accent)', marginBottom: 4 }}>
+                      {fmt(pomodoroRemaining)}
+                    </div>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+                      {pomodoroRunning ? '⏳ Focus Mode' : '⏸️ Ready to start'}
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <button
+                      className={pomodoroRunning ? 'btn btn-danger' : 'btn btn-primary'}
+                      style={{ flex: 1, fontSize: '0.85rem', padding: '6px 8px' }}
+                      onClick={() => setPomodoroRunning(!pomodoroRunning)}
+                    >
+                      {pomodoroRunning ? '⏸️ Pause' : '▶️ Start'}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ flex: 1, fontSize: '0.85rem', padding: '6px 8px' }}
+                      onClick={() => { setPomodoroRunning(false); setPomodoroRemaining(pomodoroTime * 60); }}
+                    >
+                      🔄 Reset
+                    </button>
+                  </div>
+
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ width: '100%', fontSize: '0.8rem' }}
+                    onClick={() => setPomodoroSettings(true)}
+                  >
+                    ⚙️ Settings
+                  </button>
+                </>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={() => setPomodoroOpen(true)}
+              style={{
+                background: 'var(--accent)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 12,
+                padding: '10px 14px',
+                fontSize: '1.4rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'transform 0.2s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              title="Pomodoro Timer"
+            >
+              ⏱️
+            </button>
+          )}
+        </div>
+
+        {/* Floating AI Chat */}
+        <div style={{
+          background: 'var(--bg-secondary)',
+          border: '2px solid var(--accent)',
+          borderRadius: 16,
+          padding: chatOpen ? 12 : 0,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          minWidth: chatMaximized ? '90vw' : chatOpen ? 340 : 'auto',
+          maxWidth: chatMaximized ? '90vw' : 380,
+          maxHeight: chatMaximized ? '90vh' : chatOpen ? 550 : 'auto',
+          minHeight: chatMaximized ? '80vh' : 'auto',
+          position: chatMaximized ? 'fixed' : 'relative',
+          left: chatMaximized ? '5vw' : 'auto',
+          top: chatMaximized ? '5vh' : 'auto',
+          zIndex: chatMaximized ? 1001 : 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          transition: 'all 0.3s ease',
+        }}>
+          {chatOpen ? (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid var(--border-color)' }}>
+                <div>
+                  <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0 }}>🤖 AI Tutor</h3>
+                  {selectedTopic && <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>💡 Ask about {selectedTopic.topicName}</p>}
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <button
+                    onClick={() => setChatMaximized(!chatMaximized)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      fontSize: '1.1rem',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted)',
+                      padding: '4px 6px',
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent)'}  
+                    onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                    title={chatMaximized ? 'Minimize' : 'Maximize'}
+                  >
+                    {chatMaximized ? '⛶' : '⛶'}
+                  </button>
+                  <button onClick={() => setChatOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+                </div>
+              </div>
+
+              {!selectedTopic ? (
+                <div style={{ padding: '40px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: 8 }}>📚</div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, fontWeight: 500 }}>
+                    Select a topic to start chatting
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                    Ask any questions or clarify your doubts
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Messages Container */}
+                  <div style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    marginBottom: 12,
+                    padding: '8px 0',
+                    minHeight: chatMaximized ? 400 : 250,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                    borderRadius: 8,
+                    background: 'var(--bg-tertiary)',
+                    padding: '12px 8px',
+                  }}>
+                    {chatMessages.length === 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12 }}>
+                        <div style={{ fontSize: '2rem' }}>💭</div>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', margin: 0 }}>
+                          Start by asking a question about this topic
+                        </p>
+                        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {['What are the main concepts?', 'Can you explain this more simply?', 'How do I apply this?'].map((prompt, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => { setChatInput(prompt); }}
+                              style={{
+                                padding: '6px 8px',
+                                fontSize: '0.75rem',
+                                background: 'var(--bg-secondary)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: 6,
+                                cursor: 'pointer',
+                                color: 'var(--text-secondary)',
+                                transition: 'all 0.2s',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = 'var(--accent)';
+                                e.currentTarget.style.color = 'white';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = 'var(--bg-secondary)';
+                                e.currentTarget.style.color = 'var(--text-secondary)';
+                              }}
+                            >
+                              "{prompt}"
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      chatMessages.map((msg, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                            maxWidth: '90%',
+                            animation: 'fadeIn 0.3s ease-in',
+                          }}
+                        >
+                          <div
+                            style={{
+                              background: msg.role === 'user' ? 'var(--accent)' : 'var(--bg-secondary)',
+                              color: msg.role === 'user' ? 'white' : 'var(--text-primary)',
+                              padding: '10px 12px',
+                              borderRadius: msg.role === 'user' ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
+                              fontSize: '0.85rem',
+                              wordWrap: 'break-word',
+                              lineHeight: 1.4,
+                              border: msg.role === 'assistant' ? '1px solid var(--border-color)' : 'none',
+                            }}
+                          >
+                            {msg.role === 'assistant' && <div style={{ fontWeight: 600, fontSize: '0.75rem', marginBottom: 4, opacity: 0.8 }}>🤖 AI Tutor</div>}
+                            {msg.content}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    {chatLoading && (
+                      <div style={{ alignSelf: 'flex-start', display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <div style={{ fontSize: '0.9rem' }}>🤖</div>
+                        <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1.4s infinite' }}></div>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1.4s infinite 0.2s' }}></div>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1.4s infinite 0.4s' }}></div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Quick Prompts */}
+                  {chatMessages.length > 0 && !chatLoading && (
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                      {['Tell me more', 'Example?', 'How to practice?'].map((text, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setChatInput(text)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '0.7rem',
+                            background: 'var(--bg-tertiary)',
+                            border: '1px solid var(--accent)',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            color: 'var(--accent)',
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'var(--accent)';
+                            e.currentTarget.style.color = 'white';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'var(--bg-tertiary)';
+                            e.currentTarget.style.color = 'var(--accent)';
+                          }}
+                        >
+                          {text}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Input */}
+                  <div style={{ display: 'flex', gap: 6, background: 'var(--bg-secondary)', padding: chatMaximized ? 12 : 8, borderRadius: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="Ask your doubt..."
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && chatInput.trim() && !chatLoading) {
+                          handleSendChat();
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        padding: chatMaximized ? '12px 14px' : '8px 10px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 6,
+                        fontSize: chatMaximized ? '0.95rem' : '0.85rem',
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                      }}
+                      disabled={chatLoading || !selectedTopic}
+                    />
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ 
+                        padding: chatMaximized ? '12px 14px' : '8px 10px', 
+                        fontSize: chatMaximized ? '1rem' : '0.9rem',
+                        minWidth: 'auto',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      onClick={handleSendChat}
+                      disabled={!chatInput.trim() || chatLoading}
+                    >
+                      {chatLoading ? '⏳' : '📤'}
+                    </button>
+                  </div>
+
+                  <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', margin: '6px 0 0 0', textAlign: 'center' }}>
+                    💡 Ask anything to clarify your doubts
+                  </p>
+                </>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={() => setChatOpen(true)}
+              style={{
+                background: 'var(--accent)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 12,
+                padding: '10px 14px',
+                fontSize: '1.4rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'transform 0.2s',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              title="Ask AI Tutor - Clarify Your Doubts"
+            >
+              🤖
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

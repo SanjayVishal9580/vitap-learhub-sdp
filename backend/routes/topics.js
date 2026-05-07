@@ -76,6 +76,20 @@ router.post('/', protect, authorize('teacher'), handleUploadArray('ppts', 10), a
   }
 });
 
+// @route   GET /api/topics/course/:courseId
+// @desc    Get all topics for a course (Admin can view all)
+// @access  Private
+router.get('/course/:courseId', protect, async (req, res) => {
+  try {
+    const topics = await Topic.find({ courseId: req.params.courseId })
+      .populate('teacherId', 'name email')
+      .sort({ order: 1 });
+    res.json(topics);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // @route   GET /api/topics/course/:courseId/teacher/:teacherId
 router.get('/course/:courseId/teacher/:teacherId', protect, async (req, res) => {
   try {
@@ -103,11 +117,15 @@ router.get('/:id', protect, async (req, res) => {
 });
 
 // @route   PUT /api/topics/:id
-router.put('/:id', protect, authorize('teacher'), handleUploadArray('ppts', 10), async (req, res) => {
+// @desc    Update a topic (Teacher or Admin)
+// @access  Private
+router.put('/:id', protect, handleUploadArray('ppts', 10), async (req, res) => {
   try {
     const topic = await Topic.findById(req.params.id);
     if (!topic) return res.status(404).json({ message: 'Topic not found' });
-    if (topic.teacherId.toString() !== req.user._id.toString()) {
+
+    // Check authorization: topic owner (teacher) or admin
+    if (topic.teacherId.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
@@ -155,13 +173,18 @@ router.put('/:id', protect, authorize('teacher'), handleUploadArray('ppts', 10),
 });
 
 // @route   DELETE /api/topics/:id
-router.delete('/:id', protect, authorize('teacher'), async (req, res) => {
+// @desc    Delete a topic (Teacher or Admin)
+// @access  Private
+router.delete('/:id', protect, async (req, res) => {
   try {
     const topic = await Topic.findById(req.params.id);
     if (!topic) return res.status(404).json({ message: 'Topic not found' });
-    if (topic.teacherId.toString() !== req.user._id.toString()) {
+
+    // Check authorization: topic owner (teacher) or admin
+    if (topic.teacherId.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized' });
     }
+
     await Topic.findByIdAndDelete(req.params.id);
     res.json({ message: 'Topic deleted' });
   } catch (error) {

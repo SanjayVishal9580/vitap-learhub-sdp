@@ -151,17 +151,34 @@ router.post('/tutor', protect, async (req, res) => {
   } catch (error) {
     console.error('[AI] Request error:', error.message);
     
-    // Specific error handling
-    if (error.message.includes('rate')) {
+    // Missing API key
+    if (error.message.includes('OPENROUTER_API_KEY') || error.message.includes('not found')) {
+      return res.status(503).json({
+        message: '🔑 AI Tutor is not configured. Please setup OpenRouter API key in backend/.env',
+        error: 'Missing OPENROUTER_API_KEY in environment variables. See OPENROUTER_SETUP.md for instructions.',
+      });
+    }
+
+    // Invalid API key
+    if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+      return res.status(503).json({
+        message: '❌ OpenRouter API key is invalid. Please check your configuration.',
+        error: 'API authentication failed - verify OPENROUTER_API_KEY in backend/.env',
+      });
+    }
+
+    // Rate limiting
+    if (error.message.includes('rate') || error.message.includes('429')) {
       return res.status(429).json({
-        message: 'Too many requests. Please wait a moment before trying again.',
+        message: '⏱️ Too many requests. Please wait a moment before trying again.',
         error: error.message,
       });
     }
 
-    if (error.message.includes('API')) {
+    // Service unavailable
+    if (error.message.includes('API') || error.message.includes('service')) {
       return res.status(503).json({
-        message: 'AI service is temporarily unavailable. Please try again later.',
+        message: '🚫 AI service is temporarily unavailable. Please try again later.',
         error: error.message,
       });
     }

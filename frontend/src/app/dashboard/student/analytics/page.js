@@ -4,6 +4,22 @@ import { getStudentAnalytics } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  ComposedChart,
+} from 'recharts';
 
 export default function StudentAnalyticsPage() {
   const { user } = useAuth();
@@ -47,6 +63,110 @@ export default function StudentAnalyticsPage() {
         </div>
         <div className="progress-bar"><div className="progress-fill" style={{ width: `${(data?.stats?.totalXP || 0) % 100}%` }}></div></div>
       </div>
+
+      {/* Charts Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: 24, marginBottom: 32 }}>
+        {/* XP Progress Over Time */}
+        {data?.quizAttempts?.length > 0 && (
+          <div className="card">
+            <h3 style={{ marginBottom: 16, fontSize: '1rem', fontWeight: 700 }}>📈 XP Progress Over Time</h3>
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart
+                data={data.quizAttempts
+                  .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+                  .reduce((acc, attempt, idx) => {
+                    const xpGained = attempt.score;
+                    const prevXP = idx > 0 ? acc[idx - 1].cumulativeXP : 0;
+                    acc.push({
+                      date: new Date(attempt.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                      cumulativeXP: prevXP + xpGained,
+                      attempt: idx + 1,
+                    });
+                    return acc;
+                  }, [])}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="attempt" stroke="var(--text-muted)" />
+                <YAxis stroke="var(--text-muted)" />
+                <Tooltip
+                  contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8 }}
+                  labelStyle={{ color: 'var(--text-primary)' }}
+                />
+                <Line type="monotone" dataKey="cumulativeXP" stroke="#6366f1" strokeWidth={2} dot={{ fill: '#6366f1', r: 4 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Score Distribution */}
+        {data?.quizAttempts?.length > 0 && (
+          <div className="card">
+            <h3 style={{ marginBottom: 16, fontSize: '1rem', fontWeight: 700 }}>📊 Quiz Score Distribution</h3>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart
+                data={(() => {
+                  const passed = data.quizAttempts.filter(a => a.status === 'PASSED').length;
+                  const failed = data.quizAttempts.filter(a => a.status === 'FAILED').length;
+                  return [
+                    { name: 'Passed', value: passed, fill: '#10b981' },
+                    { name: 'Failed', value: failed, fill: '#ef4444' },
+                  ];
+                })()}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="name" stroke="var(--text-muted)" />
+                <YAxis stroke="var(--text-muted)" />
+                <Tooltip contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8 }} />
+                <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                  {[
+                    { name: 'Passed', value: 0, fill: '#10b981' },
+                    { name: 'Failed', value: 0, fill: '#ef4444' },
+                  ].map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* Topic Performance Chart */}
+      {data?.quizAttempts?.length > 0 && (
+        <div className="card" style={{ marginBottom: 32 }}>
+          <h3 style={{ marginBottom: 16, fontSize: '1rem', fontWeight: 700 }}>🎯 Performance by Topic</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart
+              data={Object.entries(
+                data.quizAttempts.reduce((acc, attempt) => {
+                  const topic = attempt.topicId?.topicName || 'Unknown';
+                  if (!acc[topic]) {
+                    acc[topic] = { attempts: 0, passed: 0, totalScore: 0 };
+                  }
+                  acc[topic].attempts += 1;
+                  acc[topic].totalScore += attempt.score;
+                  if (attempt.status === 'PASSED') {
+                    acc[topic].passed += 1;
+                  }
+                  return acc;
+                }, {})
+              ).map(([topic, stats]) => ({
+                topic,
+                'Pass Rate': Math.round((stats.passed / stats.attempts) * 100),
+                'Avg Score': Math.round(stats.totalScore / stats.attempts),
+              }))}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="topic" stroke="var(--text-muted)" angle={-45} textAnchor="end" height={80} />
+              <YAxis stroke="var(--text-muted)" />
+              <Tooltip contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8 }} />
+              <Legend />
+              <Bar dataKey="Pass Rate" fill="#8b5cf6" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="Avg Score" fill="#f59e0b" radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: selectedAttempt ? '1fr 400px' : '1fr', gap: 24, transition: 'all 0.3s ease' }}>
         <div>

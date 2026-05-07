@@ -70,9 +70,6 @@ Generate ${questionCount} questions now as pure JSON:`;
 
     console.log(`[QUIZ] Generating ${questionCount} ${difficulty} questions for: ${topicName}`);
     
-
-    console.log(`[QUIZ] Generating ${questionCount} ${difficulty} questions for: ${topicName}`);
-    
     const response = await generateWithOpenRouter(prompt, 'json');
     console.log(`[QUIZ] Received response (${response.length} chars)`);
 

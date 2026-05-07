@@ -22,14 +22,34 @@ export default function GroupsPage() {
 
   useEffect(() => {
     loadGroups();
-    const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000');
+    const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000', {
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 5,
+    });
     socketRef.current = socket;
-    socket.emit('user_online', user?._id);
+
+    socket.on('connect', () => {
+      console.log('Socket connected:', socket.id);
+      if (user?._id) socket.emit('user_online', user._id);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Socket disconnected');
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+    });
+
     socket.on('new_message', (msg) => {
+      console.log('New message received:', msg);
       setMessages(prev => [...prev, msg]);
     });
+
     return () => socket.disconnect();
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -42,17 +62,44 @@ export default function GroupsPage() {
   };
 
   const handleSelectGroup = async (group) => {
+    console.log('Selecting group:', group._id);
     setSelectedGroup(group);
-    socketRef.current?.emit('join_group', group._id);
-    try { const msgs = await getGroupMessages(group._id); setMessages(msgs); }
-    catch (err) {}
+    socketRef.current?.emit('join_group', group._id, (error) => {
+      if (error) {
+        console.error('Failed to join group:', error);
+      } else {
+        console.log('Successfully joined group room');
+      }
+    });
+    try { 
+      const msgs = await getGroupMessages(group._id); 
+      console.log('Loaded messages:', msgs.length);
+      setMessages(msgs); 
+    }
+    catch (err) {
+      console.error('Failed to load messages:', err);
+      toast.error('Failed to load messages');
+    }
   };
 
   const handleSend = () => {
     if (!newMsg.trim() || !selectedGroup) return;
+    
+    console.log('Sending message:', { groupId: selectedGroup._id, senderName: user.name, content: newMsg });
+    
     socketRef.current?.emit('send_message', {
-      groupId: selectedGroup._id, senderId: user._id,
-      senderName: user.name, content: newMsg, type: 'text',
+      groupId: selectedGroup._id, 
+      senderId: user._id,
+      senderName: user.name, 
+      content: newMsg, 
+      type: 'text',
+    }, (error) => {
+      if (error) {
+        console.error('Failed to send message:', error);
+        toast.error('Failed to send message');
+      } else {
+        console.log('Message sent successfully');
+      }
     });
     setNewMsg('');
   };

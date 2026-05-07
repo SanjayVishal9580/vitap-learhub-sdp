@@ -203,10 +203,15 @@ export default function CourseDetailPage({ params: paramsPromise }) {
   const loadData = async () => {
     try {
       const [courseData, topicsData, enrollments] = await Promise.all([
-        getCourse(courseId), 
-        getTopics(courseId, teacherId),
-        getMyEnrolled()
+        getCourse(courseId).catch(err => { throw new Error(`Course load failed: ${err.message}`); }), 
+        getTopics(courseId, teacherId).catch(err => { throw new Error(`Topics load failed: ${err.message}`); }),
+        getMyEnrolled().catch(err => { throw new Error(`Enrollment data load failed: ${err.message}`); })
       ]);
+      
+      if (!courseData) {
+        throw new Error('Course not found or has been deleted');
+      }
+      
       setCourse(courseData);
       setTopics(topicsData);
       
@@ -219,8 +224,16 @@ export default function CourseDetailPage({ params: paramsPromise }) {
         setCompletedTopicIds(myEnrollment.completedTopics.map(t => t.topicId));
       }
     } catch (err) { 
-      console.error(err);
-      toast.error('Failed to load course'); 
+      console.error('Course load error:', err);
+      if (err.message.includes('Course not found')) {
+        toast.error('❌ This course has been deleted');
+      } else if (err.message.includes('Course load failed')) {
+        toast.error('❌ Failed to load course details');
+      } else if (err.message.includes('Topics load failed')) {
+        toast.error('❌ Failed to load course topics');
+      } else {
+        toast.error('Failed to load course');
+      }
     }
     finally { setLoading(false); }
   };
@@ -623,7 +636,7 @@ export default function CourseDetailPage({ params: paramsPromise }) {
                       </div>
                     )}
                     {/* PPT / Materials */}
-                    {(topic.pptUrl || topic.pptLinks?.length > 0) && (
+                    {(topic.pptUrl || topic.pptLinks?.length > 0 || topic.pptFiles?.length > 0) && (
                       <div style={{ marginBottom: 20 }}>
                         <h4 style={{ marginBottom: 10 }}>📊 Presentations & Materials</h4>
 

@@ -84,7 +84,10 @@ router.get('/course/:courseId', protect, async (req, res) => {
     const topics = await Topic.find({ courseId: req.params.courseId })
       .populate('teacherId', 'name email')
       .sort({ order: 1 });
-    res.json(topics);
+    
+    // Filter out topics with deleted teachers
+    const validTopics = topics.filter(t => t.teacherId !== null);
+    res.json(validTopics);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -110,6 +113,7 @@ router.get('/:id', protect, async (req, res) => {
       .populate('teacherId', 'name email avatar')
       .populate('courseId', 'courseCode courseName');
     if (!topic) return res.status(404).json({ message: 'Topic not found' });
+    if (!topic.teacherId) return res.status(404).json({ message: 'Topic author has been deleted' });
     res.json(topic);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });

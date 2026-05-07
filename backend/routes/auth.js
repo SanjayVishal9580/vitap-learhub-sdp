@@ -1,6 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const Enrollment = require('../models/Enrollment');
+const Course = require('../models/Course');
+const Topic = require('../models/Topic');
+const Comment = require('../models/Comment');
+const Group = require('../models/Group');
+const Message = require('../models/Message');
 const { protect, authorize, generateToken } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 
@@ -199,11 +205,12 @@ router.get('/users', protect, authorize('admin'), async (req, res) => {
 });
 
 // @route   DELETE /api/auth/users/:id
-// @desc    Delete user (admin only)
+// @desc    Delete user (admin only) - includes cascading deletes
 // @access  Private/Admin
 router.delete('/users/:id', protect, authorize('admin'), async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    const userId = req.params.id;
+    const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
     
     // Prevent admin from deleting themselves
@@ -211,10 +218,91 @@ router.delete('/users/:id', protect, authorize('admin'), async (req, res) => {
       return res.status(400).json({ message: 'Cannot delete your own account' });
     }
 
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ message: 'User removed' });
+    console.log(`[DELETE USER] Starting cascading delete for user: ${userId}`);
+    
+    try {
+      // 1. Find and delete all enrollments for this student user
+      await Enrollment.deleteMany({ studentId: userId });
+      console.log(`[DELETE USER] Deleted enrollments`);
+
+      // 2. Remove user from course student lists
+      await Course.updateMany(
+        { students: userId },
+        { $pull: { students: userId } }
+      );
+      console.log(`[DELETE USER] Removed from course student lists`);
+
+      // 3. If user is a teacher, handle their courses
+      // A) Delete courses where teacherId matches (old courses created by this teacher)
+      const oldTeacherCourses = await Course.find({ teacherId: userId }).select('_id');
+      if (oldTeacherCourses.length > 0) {
+        const courseIds = oldTeacherCourses.map(c => c._id);
+        
+        // Delete all topics for these courses
+        await Topic.deleteMany({ courseId: { $in: courseIds } });
+        console.log(`[DELETE USER] Deleted topics for old teacher courses`);
+        
+        // Delete all comments for these courses
+        await Comment.deleteMany({ courseId: { $in: courseIds } });
+        console.log(`[DELETE USER] Deleted comments for old teacher courses`);
+        
+        // Delete enrollments related to these courses
+        await Enrollment.deleteMany({ courseId: { $in: courseIds } });
+        console.log(`[DELETE USER] Deleted enrollments for old teacher courses`);
+        
+        // Delete the courses themselves
+        await Course.deleteMany({ teacherId: userId });
+        console.log(`[DELETE USER] Deleted old teacher courses`);
+      }
+
+      // B) Remove teacher from enrolledTeachers array in all courses
+      await Course.updateMany(
+        { 'enrolledTeachers.teacherId': userId },
+        { $pull: { enrolledTeachers: { teacherId: userId } } }
+      );
+      console.log(`[DELETE USER] Removed teacher from enrolledTeachers in courses`);
+
+      // 4. Delete topics created by this user
+      await Topic.deleteMany({ createdBy: userId });
+      console.log(`[DELETE USER] Deleted created topics`);
+      
+      // 5. Delete comments by this user
+      await Comment.deleteMany({ userId: userId });
+      console.log(`[DELETE USER] Deleted user comments`);
+
+      // 6. Remove from all groups
+      await Group.updateMany(
+        { members: userId },
+        { $pull: { members: userId } }
+      );
+      console.log(`[DELETE USER] Removed from groups`);
+
+      // 7. Delete all messages to/from this user
+      await Message.deleteMany({ 
+        $or: [{ senderId: userId }, { receiverId: userId }]
+      });
+      console.log(`[DELETE USER] Deleted messages`);
+
+      // 8. Finally delete the user
+      await User.findByIdAndDelete(userId);
+      console.log(`[DELETE USER] User deleted successfully`);
+      
+      res.json({ 
+        message: 'User and all related data removed successfully',
+        details: {
+          cascadeNote: 'All enrollments, courses, topics, and messages deleted. Past papers preserved.'
+        }
+      });
+    } catch (cascadeError) {
+      console.error('[DELETE USER] Cascading delete error:', cascadeError.message);
+      throw cascadeError;
+    }
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('[DELETE USER] Error:', error.message);
+    res.status(500).json({ 
+      message: 'Error deleting user',
+      error: error.message 
+    });
   }
 });
 

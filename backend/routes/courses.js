@@ -40,7 +40,17 @@ router.get('/', protect, async (req, res) => {
     const courses = await Course.find({ status: 'active' })
       .populate('enrolledTeachers.teacherId', 'name email avatar')
       .sort({ courseCode: 1 });
-    res.json(courses);
+    
+    // Filter out courses with no valid teachers (deleted teacher references)
+    const validCourses = courses.map(course => {
+      const validTeachers = course.enrolledTeachers.filter(t => t.teacherId !== null);
+      return {
+        ...course.toObject(),
+        enrolledTeachers: validTeachers
+      };
+    }).filter(course => course.enrolledTeachers.length > 0);
+    
+    res.json(validCourses);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -58,9 +68,16 @@ router.get('/:id', protect, async (req, res) => {
       return res.status(404).json({ message: 'Course not found' });
     }
 
+    // Filter out deleted teacher references
+    const validTeachers = course.enrolledTeachers.filter(t => t.teacherId !== null);
+    
+    if (validTeachers.length === 0) {
+      return res.status(404).json({ message: 'Course has no valid teachers' });
+    }
+
     // Get student count per teacher
     const teacherStats = await Promise.all(
-      course.enrolledTeachers.map(async (t) => {
+      validTeachers.map(async (t) => {
         const studentCount = await Enrollment.countDocuments({
           courseId: course._id,
           teacherId: t.teacherId._id,

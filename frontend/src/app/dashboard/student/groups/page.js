@@ -15,10 +15,17 @@ export default function GroupsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [maxMembers, setMaxMembers] = useState(5);
   const [passcode, setPasscode] = useState('');
   const [loading, setLoading] = useState(true);
+  const [unreadCounts, setUnreadCounts] = useState({});
   const socketRef = useRef(null);
   const msgEndRef = useRef(null);
+  const selectedGroupRef = useRef(null);
+
+  useEffect(() => {
+    selectedGroupRef.current = selectedGroup;
+  }, [selectedGroup]);
 
   useEffect(() => {
     loadGroups();
@@ -45,7 +52,15 @@ export default function GroupsPage() {
 
     socket.on('new_message', (msg) => {
       console.log('New message received:', msg);
-      setMessages(prev => [...prev, msg]);
+      if (selectedGroupRef.current?._id === msg.groupId) {
+        setMessages(prev => [...prev, msg]);
+      } else {
+        setUnreadCounts(prev => ({
+          ...prev,
+          [msg.groupId]: (prev[msg.groupId] || 0) + 1
+        }));
+        toast.success(`New message in a group!`, { icon: '💬' });
+      }
     });
 
     return () => socket.disconnect();
@@ -56,14 +71,37 @@ export default function GroupsPage() {
   }, [messages]);
 
   const loadGroups = async () => {
-    try { const data = await getMyGroups(); setGroups(data); }
+    try { 
+      const data = await getMyGroups(); 
+      setGroups(data);
+      // Join rooms for all groups to receive notifications
+      if (socketRef.current) {
+        data.forEach(g => {
+          socketRef.current.emit('join_group', g._id);
+        });
+      }
+    }
     catch (err) {}
     finally { setLoading(false); }
   };
 
+  useEffect(() => {
+    if (socketRef.current && groups.length > 0) {
+      groups.forEach(g => {
+        socketRef.current.emit('join_group', g._id);
+      });
+    }
+  }, [groups, socketRef.current]);
+
   const handleSelectGroup = async (group) => {
     console.log('Selecting group:', group._id);
     setSelectedGroup(group);
+    // Reset unread count for this group
+    setUnreadCounts(prev => ({
+      ...prev,
+      [group._id]: 0
+    }));
+    
     socketRef.current?.emit('join_group', group._id, (error) => {
       if (error) {
         console.error('Failed to join group:', error);
@@ -124,9 +162,9 @@ export default function GroupsPage() {
   const handleCreate = async () => {
     if (!groupName.trim()) return;
     try {
-      const group = await createGroup({ name: groupName });
+      const group = await createGroup({ name: groupName, maxMembers: parseInt(maxMembers) });
       toast.success(`Group created! Passcode: ${group.passcode}`);
-      setGroupName(''); setShowCreate(false); loadGroups();
+      setGroupName(''); setMaxMembers(5); setShowCreate(false); loadGroups();
     } catch (err) { toast.error(err.message); }
   };
 
@@ -167,9 +205,23 @@ export default function GroupsPage() {
                 <div key={g._id} className={`card card-hover`}
                   style={{ padding: 16, cursor: 'pointer', borderColor: selectedGroup?._id === g._id ? 'var(--accent)' : '' }}
                   onClick={() => handleSelectGroup(g)}>
-                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{g.name}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    👥 {g.members?.length}/{g.maxMembers} • 🔑 {g.passcode}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{g.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                        👥 {g.members?.length}/{g.maxMembers} • 🔑 {g.passcode}
+                      </div>
+                    </div>
+                    {unreadCounts[g._id] > 0 && (
+                      <div style={{
+                        background: 'var(--accent)', color: 'white',
+                        borderRadius: '50%', minWidth: 20, height: 20,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '0.7rem', fontWeight: 800, padding: '0 6px'
+                      }}>
+                        {unreadCounts[g._id]}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -249,6 +301,10 @@ export default function GroupsPage() {
             <div className="form-group">
               <label className="form-label">Group Name</label>
               <input className="form-input" value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="e.g. DSA Study Squad" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Max Members (2-20)</label>
+              <input type="number" className="form-input" value={maxMembers} onChange={(e) => setMaxMembers(e.target.value)} min="2" max="20" />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" onClick={handleCreate}>Create</button>

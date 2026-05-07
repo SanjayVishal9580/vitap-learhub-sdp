@@ -33,6 +33,7 @@ const groupSchema = new mongoose.Schema({
   maxMembers: {
     type: Number,
     default: 5,
+    min: 2,
     max: 20,
   },
 }, {
